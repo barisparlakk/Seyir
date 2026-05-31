@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+dist/
+build/
+
+# Models & data (large files — track with Git LFS if needed)
+models/checkpoints/*.pt
+models/checkpoints/*.zip
+data/raw/detector/images/
+data/raw/detector/labels/
+data/processed/trajectories/
+
+# Logs
+logs/*.log
+logs/*.json
+
+# Frontend
+dashboard/frontend/node_modules/
+dashboard/frontend/dist/
+
+# Editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
