@@ -1,19 +1,26 @@
-# GCP Quick-Start — CARLA Server for Seyir
+# GCP Quick-Start — Free CARLA Server for Seyir (CPU-only, $0)
+
+> **Note:** GCP blocks GPU quota on free trial accounts. This guide uses a
+> CPU-only VM instead. CARLA runs in software rendering at ~5-8 fps — slow
+> but fully functional for headless data collection, training, and evaluation.
+> Your $300 free credits cover ~1000 hours on this instance.
+
+---
 
 ## Step 1 — Create your Google Cloud account
 
-1. Go to https://cloud.google.com
-2. Click **Start free** → sign in with your Google account
-3. Enter a credit card (required for verification — **you will NOT be charged during the trial**)
-4. You receive **$300 free credits** valid for 90 days
+1. Go to https://cloud.google.com → click **Start free**
+2. Sign in with your Google account
+3. Enter a credit card (**you will NOT be charged during the trial**)
+4. You get **$300 free credits** valid for 90 days
 
 ---
 
 ## Step 2 — Create the VM
 
-### Via the web console (easiest)
+### Via the web console
 
-1. Open https://console.cloud.google.com/compute/instances
+1. Open: https://console.cloud.google.com/compute/instances
 2. Click **Create Instance**
 3. Fill in:
 
@@ -22,41 +29,36 @@
    | Name | `seyir-carla` |
    | Region | `us-central1` (Iowa) — cheapest |
    | Zone | `us-central1-a` |
-   | Machine family | **GPU** tab |
-   | GPU type | **NVIDIA T4** |
-   | Number of GPUs | 1 |
-   | Machine type | `n1-standard-4` (4 vCPU, 15 GB RAM) |
+   | Machine family | **General purpose** |
+   | Series | **E2** |
+   | Machine type | `e2-standard-8` (8 vCPU, 32 GB RAM) |
    | Boot disk OS | **Ubuntu 22.04 LTS** |
-   | Boot disk size | **100 GB** SSD |
-   | Firewall | ✅ Allow HTTP traffic, ✅ Allow HTTPS traffic |
+   | Boot disk size | **60 GB** SSD |
 
-4. Click **Create** — the VM starts in ~2 minutes.
+4. Click **Create** — VM is ready in ~1 minute.
 
-### Via `gcloud` CLI (if you have it installed)
+**Cost:** `e2-standard-8` costs ~$0.27/hr, covered by free credits.
+At this rate your $300 covers ~1100 hours — more than enough.
+
+### Via `gcloud` CLI
 
 ```bash
 gcloud compute instances create seyir-carla \
   --zone=us-central1-a \
-  --machine-type=n1-standard-4 \
-  --accelerator=type=nvidia-tesla-t4,count=1 \
-  --maintenance-policy=TERMINATE \
+  --machine-type=e2-standard-8 \
   --image-family=ubuntu-2204-lts \
   --image-project=ubuntu-os-cloud \
-  --boot-disk-size=100GB \
-  --boot-disk-type=pd-ssd \
-  --tags=carla-server
+  --boot-disk-size=60GB \
+  --boot-disk-type=pd-ssd
 ```
 
 ---
 
 ## Step 3 — Open firewall ports for CARLA
 
-CARLA needs TCP ports 2000–2002.
-
 ### Web console
 
 1. **VPC Network → Firewall → Create Firewall Rule**
-2. Fill in:
 
    | Field | Value |
    |---|---|
@@ -66,7 +68,7 @@ CARLA needs TCP ports 2000–2002.
    | Source IPv4 | `0.0.0.0/0` |
    | Protocols/ports | `tcp:2000-2002` |
 
-3. Click **Create**
+2. Click **Create**
 
 ### Via `gcloud` CLI
 
@@ -74,14 +76,14 @@ CARLA needs TCP ports 2000–2002.
 gcloud compute firewall-rules create carla-ports \
   --allow tcp:2000-2002 \
   --source-ranges 0.0.0.0/0 \
-  --description "CARLA simulator RPC + streaming ports"
+  --description "CARLA RPC and streaming ports"
 ```
 
 ---
 
 ## Step 4 — SSH into the VM
 
-Click the **SSH** button next to your instance in the console, or:
+Click the **SSH** button in the console next to your instance, or:
 
 ```bash
 gcloud compute ssh seyir-carla --zone us-central1-a
@@ -89,25 +91,26 @@ gcloud compute ssh seyir-carla --zone us-central1-a
 
 ---
 
-## Step 5 — Install CARLA
+## Step 5 — Install CARLA (one command)
 
-Once inside the VM:
+Inside the VM, run:
 
 ```bash
-# Upload the install script (from your Mac):
-gcloud compute scp setup/install_carla_server.sh seyir-carla:~ --zone us-central1-a
-
-# SSH in and run it:
-gcloud compute ssh seyir-carla --zone us-central1-a
-chmod +x ~/install_carla_server.sh
-~/install_carla_server.sh
+wget -O install.sh https://raw.githubusercontent.com/YOUR_REPO/main/setup/install_carla_server.sh
+chmod +x install.sh && ./install.sh --no-gpu
 ```
 
-This script:
-- Installs NVIDIA drivers + CUDA
-- Downloads and extracts CARLA 0.9.15
-- Creates `~/start_carla.sh` and `~/stop_carla.sh`
-- Sets up a systemd service for auto-start on reboot
+Or if you have the repo cloned on the VM:
+
+```bash
+bash setup/install_carla_server.sh --no-gpu
+```
+
+This takes ~3-5 minutes. It will:
+- Install required system packages
+- Download CARLA 0.9.15 (~10 GB)
+- Create `~/start_carla.sh` and `~/stop_carla.sh`
+- Set up a systemd service
 
 ---
 
@@ -115,19 +118,31 @@ This script:
 
 ```bash
 ~/start_carla.sh
-# Monitor startup (takes ~30 s):
+
+# Watch the startup log (takes ~30-60 seconds):
 tail -f ~/carla.log
-# You should see: "4.27.2-0+++UE4+Release-4.27 522 0"
+
+# You should eventually see something like:
+# LogCarla: Initialized
 ```
 
 ---
 
-## Step 7 — Connect from your Mac
+## Step 7 — Note your external IP
 
-Find your VM's **External IP** in the GCP console (Compute Engine → VM Instances).
+In the GCP console → Compute Engine → VM Instances, copy the **External IP**.
+
+Or from inside the VM:
+```bash
+curl -s https://ipinfo.io/ip
+```
+
+---
+
+## Step 8 — Connect from your Mac
 
 ```bash
-# On your Mac:
+# On your Mac, in the Seyir project:
 python scripts/check_connection.py --host <external-ip>
 ```
 
@@ -144,38 +159,65 @@ Expected output:
 
 ---
 
-## Step 8 — Run Seyir
+## Step 9 — Run Seyir
+
+All scripts accept `--host`:
 
 ```bash
-# All scripts accept --host:
-python scripts/collect_data.py  --host <external-ip> --frames 5000
+python scripts/collect_data.py   --host <external-ip> --frames 5000
+python scripts/train_detector.py
+python scripts/train_predictor.py
 python scripts/run_simulation.py --host <external-ip> --scenario narrow_street --record
 python scripts/evaluate.py       --host <external-ip> --runs 3
 ```
 
----
-
-## Cost management
-
-| Action | Command |
-|---|---|
-| **Stop the VM** (saves ~90% cost) | `gcloud compute instances stop seyir-carla --zone us-central1-a` |
-| **Start it again** | `gcloud compute instances start seyir-carla --zone us-central1-a` |
-| **Delete permanently** | `gcloud compute instances delete seyir-carla --zone us-central1-a` |
-
-> Stop the VM whenever you're not using it. A T4 instance costs ~$0.35/hr running
-> but only ~$0.01/hr stopped (just the disk). Over a 90-day trial you have $300 —
-> that's ~857 hours of GPU time, more than enough for the full Seyir pipeline.
+Training scripts (`train_detector.py`, `train_predictor.py`) run entirely
+on your Mac using collected data — no server needed for those.
 
 ---
 
-## No-GPU alternative (Oracle Free Tier, $0 forever)
+## Cost management — stop the VM when not in use
 
-1. Sign up at https://cloud.oracle.com/free
-2. Create **VM.Standard.E2.4** (4 OCPU, 24 GB RAM, Ubuntu 22.04) — free forever
-3. Run the install script with `--no-gpu`:
-   ```bash
-   ~/install_carla_server.sh --no-gpu
-   ```
-4. CARLA runs at ~5-8 fps in software rendering mode — sufficient for headless
-   data collection and scenario evaluation, not great for real-time visualisation.
+The VM costs ~$0.27/hr **only while running**. Stop it between sessions:
+
+```bash
+# Stop (keeps disk, ~$0.01/hr for storage only):
+gcloud compute instances stop seyir-carla --zone us-central1-a
+
+# Start again later:
+gcloud compute instances start seyir-carla --zone us-central1-a
+
+# Delete permanently when done:
+gcloud compute instances delete seyir-carla --zone us-central1-a
+```
+
+Or click the **Stop** / **Start** buttons in the GCP console.
+
+---
+
+## Troubleshooting
+
+**CARLA starts but immediately crashes:**
+```bash
+# Check available memory:
+free -h
+# e2-standard-8 has 32 GB — should be fine.
+# If using a smaller instance, CARLA needs at least 8 GB.
+```
+
+**`check_connection.py` fails on TCP step:**
+- Confirm the firewall rule was created (Step 3)
+- Confirm CARLA is running: `cat ~/carla.pid && ps aux | grep Carla`
+- Try from the VM itself: `python3 -c "import carla; c=carla.Client('localhost',2000); print(c.get_server_version())"`
+
+**Very slow (< 3 fps):**
+This is normal for CPU-only without Vulkan. Add to `start_carla.sh`:
+```
+-quality-level=Low -benchmark -fps=5
+```
+At 5 fps, 5000 training frames takes ~17 minutes — acceptable.
+
+**External IP changed after restart:**
+GCP external IPs are ephemeral by default. Either:
+- Reserve a static IP (GCP → VPC Network → IP addresses → Reserve)
+- Or just re-run `check_connection.py` with the new IP each time
