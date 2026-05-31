@@ -1,0 +1,59 @@
+version: "3.9"
+
+services:
+  carla-server:
+    image: carlasimulator/carla:0.9.15
+    runtime: nvidia                  # GPU passthrough — requires nvidia-container-toolkit
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - DISPLAY=                     # headless; set to :0 if you want a display
+    command: >
+      /bin/bash -c "
+        /home/carla/CarlaUE4.sh
+        -RenderOffScreen
+        -nosound
+        -carla-server
+        -carla-rpc-port=2000
+        -fps=20
+        -quality-level=Low
+      "
+    ports:
+      - "2000:2000"   # RPC (main client connection)
+      - "2001:2001"   # streaming
+      - "2002:2002"   # secondary (used by some sensors)
+    volumes:
+      - carla-logs:/home/carla/CarlaUE4/Saved/Logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c",
+             "import socket; s=socket.socket(); s.connect(('localhost',2000)); s.close()"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 60s
+
+  # Optional: run without GPU using software rendering (much slower, dev only)
+  carla-server-cpu:
+    image: carlasimulator/carla:0.9.15
+    profiles: ["cpu"]               # only starts when: docker compose --profile cpu up
+    command: >
+      /bin/bash -c "
+        SDL_VIDEODRIVER=offscreen
+        /home/carla/CarlaUE4.sh
+        -RenderOffScreen
+        -nosound
+        -carla-server
+        -carla-rpc-port=2000
+        -fps=10
+        -quality-level=Low
+        -opengl
+      "
+    ports:
+      - "2000:2000"
+      - "2001:2001"
+      - "2002:2002"
+    restart: unless-stopped
+
+volumes:
+  carla-logs:

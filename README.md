@@ -101,19 +101,54 @@ seyir/
 
 ## Setup
 
-### 1. CARLA
+### 1. CARLA — macOS / Remote server
 
-Download CARLA 0.9.15 from [https://github.com/carla-simulator/carla/releases](https://github.com/carla-simulator/carla/releases) and install the Python API:
+> **macOS note:** CARLA 0.9.15 has no native macOS build. Run the server on a
+> remote Linux machine and connect via TCP from your Mac. All Python/ML code
+> runs locally; only the CARLA process needs to be on Linux.
+
+#### Option A — Docker on a Linux box (recommended)
+
+```bash
+# On the Linux server (requires nvidia-container-toolkit for GPU):
+git clone <this repo>
+docker compose up -d carla-server
+
+# Verify it's up (from anywhere):
+docker compose logs -f carla-server
+```
+
+Without a GPU (development only, 10 fps):
+```bash
+docker compose --profile cpu up -d carla-server-cpu
+```
+
+#### Option B — Bare-metal on Ubuntu 22.04
+
+```bash
+# On the Linux server:
+wget https://github.com/carla-simulator/carla/releases/download/0.9.15/CARLA_0.9.15.tar.gz
+tar xf CARLA_0.9.15.tar.gz && cd CARLA_0.9.15
+./CarlaUE4.sh -RenderOffScreen -carla-rpc-port=2000 -fps=20 &
+```
+
+#### Firewall
+
+Open TCP ports **2000–2002** on the Linux host so your Mac can reach them.
+
+#### Install the Python client (on your Mac)
 
 ```bash
 pip install carla==0.9.15
 ```
 
-Start the CARLA server:
+#### Verify connectivity
+
 ```bash
-./CarlaUE4.sh -RenderOffScreen   # headless
-./CarlaUE4.sh                     # with rendering
+python scripts/check_connection.py --host <linux-server-ip> --port 2000
 ```
+
+Pass `--host <ip>` to every script after this.
 
 ### 2. Python environment
 
@@ -136,7 +171,7 @@ npm install
 
 ### Collect training data
 ```bash
-python scripts/collect_data.py --scenario narrow_street --frames 5000
+python scripts/collect_data.py --host <server-ip> --scenario narrow_street --frames 5000
 ```
 
 ### Train object detector
@@ -152,13 +187,13 @@ python scripts/train_predictor.py --epochs 100 --batch 64
 ### Run a scenario
 ```bash
 # Narrow street, seed 42, 120 s, save metrics
-python scripts/run_simulation.py --scenario narrow_street --seed 42 --duration 120 --record
+python scripts/run_simulation.py --host <server-ip> --scenario narrow_street --seed 42 --duration 120 --record
 
 # Village road, headless
-python scripts/run_simulation.py --scenario village_road --no-render
+python scripts/run_simulation.py --host <server-ip> --scenario village_road --no-render
 
 # Unmarked intersection
-python scripts/run_simulation.py --scenario unmarked_intersection --seed 7
+python scripts/run_simulation.py --host <server-ip> --scenario unmarked_intersection --seed 7
 ```
 
 ### Launch dashboard
