@@ -34,6 +34,7 @@ class NarrowStreetScenario:
         self.seed = seed
         self._rng = random.Random(seed)
         self._actors: list[Any] = []
+        self._ped_agents: list[Any] = []
         self._ego: Any | None = None
         self._target_waypoint: Any | None = None
         self._sensor_manager: Any | None = None
@@ -133,6 +134,7 @@ class NarrowStreetScenario:
                 pedestrians.append(w)
                 ped_agents.append(pa)
                 self._actors.append(w)
+        self._ped_agents = ped_agents
 
         # Target waypoint: ~150 m ahead following the ego's road (keeps the
         # global route sensible instead of demanding a U-turn across the map).
@@ -174,6 +176,15 @@ class NarrowStreetScenario:
     # ------------------------------------------------------------------ #
 
     def _teardown(self) -> None:
+        # Stop walker AI controllers BEFORE destroying any actors. Otherwise a
+        # controller keeps ticking against a walker that's being destroyed and
+        # CARLA aborts with "operate on a destroyed actor".
+        for pa in self._ped_agents:
+            try:
+                pa.destroy()   # stops controller, then destroys controller + walker
+            except Exception:
+                pass
+        self._ped_agents = []
         if self._sensor_manager:
             self._sensor_manager.destroy()
             self._sensor_manager = None

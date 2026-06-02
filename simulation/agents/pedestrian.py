@@ -99,6 +99,13 @@ class PedestrianAgent:
             self._trigger_road_crossing(world)
 
     def destroy(self) -> None:
+        # Stop the AI controller before destroying anything so it stops ticking
+        # against the walker (avoids CARLA's destroyed-actor abort).
+        if self._controller and self._controller.is_alive:
+            try:
+                self._controller.stop()
+            except Exception:
+                pass
         for actor in [self._controller, self._walker]:
             if actor and actor.is_alive:
                 try:
