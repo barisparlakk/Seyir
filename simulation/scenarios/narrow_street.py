@@ -80,41 +80,62 @@ class NarrowStreetScenario:
         sensor_cfg = SensorConfig()
         self._sensor_manager = SensorManager(world, self._ego, sensor_cfg)
 
-        # NPC Turkish drivers
+        # Build a list of spawn transforms AHEAD of the ego along its road, so
+        # the ego's forward camera actually sees traffic to perceive/plan around.
+        carla_map = world.get_map()
+        ego_wp = carla_map.get_waypoint(ego_spawn.location)
+        ahead_points: list[Any] = []
+        cursor = ego_wp
+        gap = 14.0   # metres between successive lead vehicles
+        while len(ahead_points) < self.N_TURKISH_DRIVERS + self.N_MOTORCYCLISTS:
+            nxts = cursor.next(gap)
+            if not nxts:
+                break
+            cursor = nxts[0]
+            tf = cursor.transform
+            tf.location.z += 0.5   # lift slightly to avoid ground collision
+            ahead_points.append(tf)
+        # Fall back to scattered spawn points if the road ran out
+        for sp in spawn_points[1:]:
+            if len(ahead_points) >= self.N_TURKISH_DRIVERS + self.N_MOTORCYCLISTS:
+                break
+            ahead_points.append(sp)
+
+        # NPC Turkish drivers (placed ahead of ego)
         npc_vehicles: list[Any] = []
         for i in range(self.N_TURKISH_DRIVERS):
             agent = TurkishDriverAgent(tm, seed=self.seed + i)
-            v = agent.spawn(world, spawn_points[1 + i])
+            v = agent.spawn(world, ahead_points[i])
             if v:
                 npc_vehicles.append(v)
                 self._actors.append(v)
 
-        # Motorcyclists
+        # Motorcyclists (placed further ahead)
         for i in range(self.N_MOTORCYCLISTS):
             agent = MotorcyclistAgent(tm, seed=self.seed + 100 + i)
-            v = agent.spawn(world, spawn_points[1 + self.N_TURKISH_DRIVERS + i])
+            v = agent.spawn(world, ahead_points[self.N_TURKISH_DRIVERS + i])
             if v:
                 npc_vehicles.append(v)
                 self._actors.append(v)
 
-        # Pedestrians
+        # Pedestrians — spawned on the navigation mesh (valid sidewalk points)
         pedestrians: list[Any] = []
-        walker_spawn_points = [
-            carla.Transform(carla.Location(x=p.location.x + self._rng.uniform(-5, 5),
-                                           y=p.location.y + self._rng.uniform(-5, 5),
-                                           z=p.location.z + 0.5))
-            for p in spawn_points[:self.N_PEDESTRIANS]
-        ]
-        for i, wsp in enumerate(walker_spawn_points):
+        for i in range(self.N_PEDESTRIANS):
             pa = PedestrianAgent(seed=self.seed + 200 + i)
-            w = pa.spawn(world, wsp)
+            w = pa.spawn(world)
             if w:
                 pedestrians.append(w)
                 self._actors.append(w)
 
-        # Target waypoint: ~200 m ahead along the road
-        target_sp = spawn_points[20 % len(spawn_points)]
-        self._target_waypoint = world.get_map().get_waypoint(target_sp.location)
+        # Target waypoint: ~150 m ahead following the ego's road (keeps the
+        # global route sensible instead of demanding a U-turn across the map).
+        target_wp = ego_wp
+        for _ in range(75):   # 75 * 2 m ≈ 150 m
+            nxts = target_wp.next(2.0)
+            if not nxts:
+                break
+            target_wp = nxts[0]
+        self._target_waypoint = target_wp
 
         logger.info(
             "NarrowStreetScenario ready: %d NPCs, %d peds, target=%s",

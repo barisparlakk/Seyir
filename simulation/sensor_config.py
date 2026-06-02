@@ -29,11 +29,11 @@ class SensorConfig:
 
     rgb_camera: dict = field(default_factory=lambda: {
         "fov": 90, "width": 1280, "height": 720,
-        "position": (2.5, 0.0, 0.7),
+        "position": (1.5, 0.0, 1.6),
     })
     depth_camera: dict = field(default_factory=lambda: {
         "fov": 90, "width": 1280, "height": 720,
-        "position": (2.5, 0.0, 0.7),
+        "position": (1.5, 0.0, 1.6),
     })
     lidar: dict = field(default_factory=lambda: {
         "channels": 64,
@@ -45,7 +45,7 @@ class SensorConfig:
     })
     semantic_seg: dict = field(default_factory=lambda: {
         "fov": 90, "width": 1280, "height": 720,
-        "position": (2.5, 0.0, 0.7),
+        "position": (1.5, 0.0, 1.6),
     })
     imu: dict = field(default_factory=lambda: {
         "noise_accel_stddev_x": 0.01,

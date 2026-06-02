@@ -40,8 +40,14 @@ class PedestrianAgent:
     # Public API
     # ------------------------------------------------------------------ #
 
-    def spawn(self, world: Any, spawn_point: Any) -> Any | None:
-        """Spawn a walker at spawn_point and attach an AI controller."""
+    def spawn(self, world: Any, spawn_point: Any = None) -> Any | None:
+        """
+        Spawn a walker on the navigation mesh and attach an AI controller.
+
+        If spawn_point is None a random navmesh location is used. Walkers must
+        spawn on valid sidewalk/navmesh points — vehicle spawn points are not
+        valid and silently fail, which is why pedestrians weren't appearing.
+        """
         import carla
 
         bp_lib = world.get_blueprint_library()
@@ -50,18 +56,34 @@ class PedestrianAgent:
         if bp.has_attribute("is_invincible"):
             bp.set_attribute("is_invincible", "false")
 
-        try:
-            walker = world.spawn_actor(bp, spawn_point)
-        except Exception as exc:
-            logger.warning("Failed to spawn pedestrian: %s", exc)
+        # Pick a valid navmesh spawn location (retry a few times).
+        walker = None
+        for _ in range(10):
+            loc = world.get_random_location_from_navigation()
+            if loc is None:
+                break
+            try:
+                walker = world.spawn_actor(bp, carla.Transform(loc))
+                break
+            except Exception:
+                continue
+        if walker is None:
+            logger.warning("Failed to spawn pedestrian on navmesh")
             return None
 
-        # Attach AI controller
+        # Attach AI controller and advance one frame so it initialises.
         ctrl_bp = bp_lib.find("controller.ai.walker")
         ctrl = world.spawn_actor(ctrl_bp, carla.Transform(), attach_to=walker)
-        world.tick()  # required before starting controller
+        if world.get_settings().synchronous_mode:
+            world.tick()
+        else:
+            world.wait_for_tick()
         ctrl.start()
         ctrl.set_max_speed(self.walking_speed)
+        # Send the walker walking toward a random navmesh destination.
+        dest = world.get_random_location_from_navigation()
+        if dest is not None:
+            ctrl.go_to_location(dest)
 
         self._walker = walker
         self._controller = ctrl
