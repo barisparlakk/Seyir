@@ -34,6 +34,7 @@ class TurkishDriverAgent:
         red_light_prob: float = 0.30,
         tailgate_distance: float = 3.0,
         horn_distance: float = 8.0,
+        seed: int | None = None,
     ) -> None:
         self.tm = traffic_manager
         self.lane_change_prob = lane_change_prob
@@ -43,7 +44,7 @@ class TurkishDriverAgent:
 
         self._vehicle: Any | None = None
         self._lane_change_cooldown: float = 0.0  # seconds remaining
-        self._rng = random.Random()
+        self._rng = random.Random(seed)
 
     # ------------------------------------------------------------------ #
     # Public API
