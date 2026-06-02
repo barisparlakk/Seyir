@@ -82,24 +82,37 @@ class NarrowStreetScenario:
         sensor_cfg = SensorConfig()
         self._sensor_manager = SensorManager(world, self._ego, sensor_cfg)
 
-        # Build a list of spawn transforms AHEAD of the ego along its road, so
-        # the ego's forward camera actually sees traffic to perceive/plan around.
+        # Distribute NPC spawn points AHEAD of the ego across lanes, so the ego
+        # sees traffic to perceive/plan around without a solid wall blocking it.
+        # Pattern per slot: lane offset cycles current → left → right, with a
+        # generous 25 m forward gap so the ego can actually make progress.
+        import carla as _carla
         carla_map = world.get_map()
         ego_wp = carla_map.get_waypoint(ego_spawn.location)
+        n_needed = self.N_TURKISH_DRIVERS + self.N_MOTORCYCLISTS
         ahead_points: list[Any] = []
         cursor = ego_wp
-        gap = 14.0   # metres between successive lead vehicles
-        while len(ahead_points) < self.N_TURKISH_DRIVERS + self.N_MOTORCYCLISTS:
+        gap = 25.0
+        slot = 0
+        while len(ahead_points) < n_needed:
             nxts = cursor.next(gap)
             if not nxts:
                 break
             cursor = nxts[0]
-            tf = cursor.transform
-            tf.location.z += 0.5   # lift slightly to avoid ground collision
+            # Choose a lane: 0=current, 1=left, 2=right (cycling)
+            target_wp = cursor
+            mode = slot % 3
+            if mode == 1 and cursor.get_left_lane() and cursor.get_left_lane().lane_type == _carla.LaneType.Driving:
+                target_wp = cursor.get_left_lane()
+            elif mode == 2 and cursor.get_right_lane() and cursor.get_right_lane().lane_type == _carla.LaneType.Driving:
+                target_wp = cursor.get_right_lane()
+            tf = target_wp.transform
+            tf.location.z += 0.5
             ahead_points.append(tf)
+            slot += 1
         # Fall back to scattered spawn points if the road ran out
         for sp in spawn_points[1:]:
-            if len(ahead_points) >= self.N_TURKISH_DRIVERS + self.N_MOTORCYCLISTS:
+            if len(ahead_points) >= n_needed:
                 break
             ahead_points.append(sp)
 
@@ -182,24 +195,35 @@ class NarrowStreetScenario:
     # ------------------------------------------------------------------ #
 
     def _teardown(self) -> None:
-        # Stop walker AI controllers BEFORE destroying any actors. Otherwise a
-        # controller keeps ticking against a walker that's being destroyed and
-        # CARLA aborts with "operate on a destroyed actor".
+        import carla
+
+        # 1. Stop walker AI controllers first so they stop ticking against
+        #    walkers that are about to be destroyed (the destroyed-actor abort).
         for pa in self._ped_agents:
             try:
                 pa.destroy()   # stops controller, then destroys controller + walker
             except Exception:
                 pass
         self._ped_agents = []
+
+        # 2. Stop + destroy sensors.
         if self._sensor_manager:
             self._sensor_manager.destroy()
             self._sensor_manager = None
-        for actor in self._actors:
-            try:
-                if actor.is_alive:
-                    actor.destroy()
-            except Exception:
-                pass
+
+        # 3. Destroy remaining actors in a single server-side batch. apply_batch
+        #    is atomic and tolerates already-dead actors, avoiding the abort that
+        #    per-actor destroy() could trigger.
+        try:
+            batch = [carla.command.DestroyActor(a) for a in self._actors if a is not None]
+            self.client.apply_batch_sync(batch, True)
+        except Exception:
+            for actor in self._actors:   # fallback to per-actor
+                try:
+                    if actor.is_alive:
+                        actor.destroy()
+                except Exception:
+                    pass
         self._actors.clear()
         self._ego = None
 
