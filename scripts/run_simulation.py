@@ -204,6 +204,16 @@ def run(args: argparse.Namespace) -> None:
             # Timing
             tick += 1
             elapsed = time.perf_counter() - t0
+            # Live progress line (overwrites in place)
+            if tick % 5 == 0:
+                pct = 100.0 * tick / max(1, max_ticks)
+                print(
+                    f"\r  tick {tick}/{max_ticks} ({pct:4.1f}%) | "
+                    f"{ego_speed * 3.6:5.1f} km/h | {behavior.state.value:<12} | "
+                    f"{len(detections):2d} det | {elapsed*1000:5.0f} ms/tick | "
+                    f"collisions={len(metrics.collisions)}",
+                    end="", flush=True,
+                )
             sleep_t = max(0.0, dt - elapsed)
             time.sleep(sleep_t)
 

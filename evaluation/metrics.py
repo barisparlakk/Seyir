@@ -65,6 +65,11 @@ class MetricsCollector:
         self._jerk_long_samples: list[float] = []
         self._jerk_lat_samples: list[float] = []
         self._distance_travelled: float = 0.0
+        # Collision debounce: CARLA fires an event every frame of contact,
+        # so we collapse repeated hits with the same actor within a time window
+        # into a single logical collision episode.
+        self._last_collision_ts: dict[str, float] = {}
+        self._collision_debounce_s: float = 1.0
 
     def record(
         self,
@@ -132,9 +137,17 @@ class MetricsCollector:
             pass
 
     def _on_collision(self, event: Any) -> None:
+        other = str(event.other_actor.type_id)
+        ts = float(event.timestamp)
+        # Debounce: ignore repeated contact with the same actor within the window
+        last = self._last_collision_ts.get(other)
+        if last is not None and (ts - last) < self._collision_debounce_s:
+            self._last_collision_ts[other] = ts
+            return
+        self._last_collision_ts[other] = ts
         self.collisions.append({
-            "timestamp": float(event.timestamp),
-            "other_actor": str(event.other_actor.type_id),
+            "timestamp": ts,
+            "other_actor": other,
             "impulse_norm": math.sqrt(
                 event.normal_impulse.x**2
                 + event.normal_impulse.y**2
