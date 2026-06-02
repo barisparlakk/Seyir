@@ -101,13 +101,17 @@ class NarrowStreetScenario:
                 break
             ahead_points.append(sp)
 
-        # NPC Turkish drivers (placed ahead of ego)
+        # NPC Turkish drivers (placed ahead of ego). Keep the agent objects so
+        # the run loop can tick their behaviours (lane changes, aggression),
+        # not just rely on spawn-time Traffic Manager settings.
         npc_vehicles: list[Any] = []
+        npc_agents: list[Any] = []
         for i in range(self.N_TURKISH_DRIVERS):
             agent = TurkishDriverAgent(tm, seed=self.seed + i)
             v = agent.spawn(world, ahead_points[i])
             if v:
                 npc_vehicles.append(v)
+                npc_agents.append(agent)
                 self._actors.append(v)
 
         # Motorcyclists (placed further ahead)
@@ -116,15 +120,18 @@ class NarrowStreetScenario:
             v = agent.spawn(world, ahead_points[self.N_TURKISH_DRIVERS + i])
             if v:
                 npc_vehicles.append(v)
+                npc_agents.append(agent)
                 self._actors.append(v)
 
         # Pedestrians — spawned on the navigation mesh (valid sidewalk points)
         pedestrians: list[Any] = []
+        ped_agents: list[Any] = []
         for i in range(self.N_PEDESTRIANS):
             pa = PedestrianAgent(seed=self.seed + 200 + i)
             w = pa.spawn(world)
             if w:
                 pedestrians.append(w)
+                ped_agents.append(pa)
                 self._actors.append(w)
 
         # Target waypoint: ~150 m ahead following the ego's road (keeps the
@@ -144,7 +151,9 @@ class NarrowStreetScenario:
         return {
             "ego_vehicle": self._ego,
             "npc_vehicles": npc_vehicles,
+            "npc_agents": npc_agents,
             "pedestrians": pedestrians,
+            "ped_agents": ped_agents,
             "target_waypoint": self._target_waypoint,
             "sensor_manager": self._sensor_manager,
         }

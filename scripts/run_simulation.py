@@ -78,6 +78,8 @@ def run(args: argparse.Namespace) -> None:
 
     ego            = env["ego_vehicle"]
     sensor_manager = env["sensor_manager"]
+    npc_agents     = env.get("npc_agents", [])
+    ped_agents     = env.get("ped_agents", [])
     world          = client.get_world()
 
     # ── Synchronous mode ───────────────────────────────────────────── #
@@ -153,6 +155,18 @@ def run(args: argparse.Namespace) -> None:
             t0 = time.perf_counter()
             world.tick()
             snapshot = world.get_snapshot()
+
+            # ── NPC behaviours (Turkish drivers, motorcyclists, walkers) ── #
+            for agent in npc_agents:
+                try:
+                    agent.tick(agent._vehicle, world, dt)
+                except Exception:
+                    pass
+            for pa in ped_agents:
+                try:
+                    pa.tick(world, dt)
+                except Exception:
+                    pass
 
             # ── a. Sensor data ─────────────────────────────────────── #
             data = sensor_manager.get_data()
