@@ -101,12 +101,12 @@ class MotorcyclistAgent(TurkishDriverAgent):
                     break
 
         if congested and speed_kmh < self.split_speed_kmh + 1.0:
-            # Weave slightly into the lane boundary
-            ctrl = vehicle.get_control()
-            # Alternate steer to weave between lanes
-            ctrl.steer = 0.15 if not self._splitting else -0.15
-            ctrl.throttle = 0.4
-            vehicle.apply_control(ctrl)
+            # Lane-split via the Traffic Manager rather than a manual steer
+            # override (which would fight the autopilot). Allow the motorcycle
+            # to keep a tiny following distance and change lanes to weave past
+            # stopped traffic — a TM-driven approximation of lane splitting.
+            self.tm.distance_to_leading_vehicle(vehicle, 0.5)
+            self.tm.force_lane_change(vehicle, self._splitting)  # alternate side
             self._splitting = not self._splitting
             logger.debug("Motorcyclist %s lane-splitting at %.1f km/h", vehicle.id, speed_kmh)
         else:

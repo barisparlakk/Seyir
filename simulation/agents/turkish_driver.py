@@ -126,10 +126,11 @@ class TurkishDriverAgent:
                 if dist < 15.0:
                     return
 
-        # Apply a brief steering override
-        ctrl = vehicle.get_control()
-        ctrl.steer = 0.3 * direction
-        vehicle.apply_control(ctrl)
+        # Ask the Traffic Manager to perform the lane change. Applying a manual
+        # steer override here would fight the autopilot (which is still driving
+        # the vehicle) and produce erratic, jittery motion. force_lane_change
+        # hands the manoeuvre to the TM cleanly. direction>0 == change to right.
+        self.tm.force_lane_change(vehicle, direction > 0)
         logger.debug("TurkishDriverAgent %s: unsignalled lane change (dir=%+d)", vehicle.id, direction)
 
     def destroy(self) -> None:
