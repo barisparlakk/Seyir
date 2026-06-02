@@ -125,16 +125,27 @@ def run(args: argparse.Namespace) -> None:
     controller       = VehicleController(ego)
 
     metrics = MetricsCollector()
-    metrics.set_route_length(500.0)
     metrics.register_collision_sensor(world, ego)
 
-    # Initial global route
+    # Route: prefer the scenario's forward lane-following waypoints (clean,
+    # no U-turn). Fall back to global A* only if the scenario didn't supply one.
     target_wp = env["target_waypoint"]
-    try:
-        waypoints = global_planner.plan(ego.get_transform(), target_wp.transform)
-    except Exception:
-        waypoints = []
-        logger.warning("Global planner failed — proceeding without global route")
+    waypoints = env.get("route_waypoints") or []
+    if not waypoints:
+        try:
+            waypoints = global_planner.plan(ego.get_transform(), target_wp.transform)
+        except Exception:
+            waypoints = []
+            logger.warning("Global planner failed — proceeding without global route")
+
+    # Set the real route length so route_completion_pct is meaningful.
+    route_len = 0.0
+    for i in range(1, len(waypoints)):
+        a = waypoints[i - 1].transform.location
+        b = waypoints[i].transform.location
+        route_len += ((a.x - b.x) ** 2 + (a.y - b.y) ** 2) ** 0.5
+    metrics.set_route_length(max(route_len, 1.0))
+    logger.info("Route: %d waypoints, %.1f m", len(waypoints), route_len)
 
     # ── Main loop ──────────────────────────────────────────────────── #
     loop_hz   = 20

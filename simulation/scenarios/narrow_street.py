@@ -37,6 +37,7 @@ class NarrowStreetScenario:
         self._ped_agents: list[Any] = []
         self._ego: Any | None = None
         self._target_waypoint: Any | None = None
+        self._route_waypoints: list[Any] = []
         self._sensor_manager: Any | None = None
 
     # ------------------------------------------------------------------ #
@@ -136,15 +137,19 @@ class NarrowStreetScenario:
                 self._actors.append(w)
         self._ped_agents = ped_agents
 
-        # Target waypoint: ~150 m ahead following the ego's road (keeps the
-        # global route sensible instead of demanding a U-turn across the map).
-        target_wp = ego_wp
+        # Build a forward lane-following route by walking the ego's lane ahead.
+        # We hand this to the controller directly (instead of global A*, which
+        # was snapping nodes and routing the ego into a U-turn at the start).
+        route_wps: list[Any] = [ego_wp]
+        cursor = ego_wp
         for _ in range(75):   # 75 * 2 m ≈ 150 m
-            nxts = target_wp.next(2.0)
+            nxts = cursor.next(2.0)
             if not nxts:
                 break
-            target_wp = nxts[0]
-        self._target_waypoint = target_wp
+            cursor = nxts[0]
+            route_wps.append(cursor)
+        self._route_waypoints = route_wps
+        self._target_waypoint = route_wps[-1]
 
         logger.info(
             "NarrowStreetScenario ready: %d NPCs, %d peds, target=%s",
@@ -157,6 +162,7 @@ class NarrowStreetScenario:
             "pedestrians": pedestrians,
             "ped_agents": ped_agents,
             "target_waypoint": self._target_waypoint,
+            "route_waypoints": self._route_waypoints,
             "sensor_manager": self._sensor_manager,
         }
 
