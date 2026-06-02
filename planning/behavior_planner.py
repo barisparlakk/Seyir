@@ -266,13 +266,20 @@ class BehaviorPlanner:
     # ------------------------------------------------------------------ #
 
     def _check_emergency(self, ego_state: EgoState, detections: list[Any]) -> bool:
-        """True if any object's TTC < emergency threshold."""
+        """True if an in-path object's TTC < emergency threshold.
+
+        Only objects ahead (z>0) and within the ego's lane width (|x|<2.5 m)
+        count — otherwise cars in other lanes or roadside objects would
+        trigger phantom emergency stops.
+        """
         for det in detections:
             if det.center_3d is None:
                 continue
-            dist = math.sqrt(det.center_3d[0]**2 + det.center_3d[1]**2 + det.center_3d[2]**2)
+            x, _, z = det.center_3d
+            if z <= 0 or abs(x) > 2.5:        # not ahead / not in our lane
+                continue
             if ego_state.speed > 0.1:
-                ttc = dist / ego_state.speed
+                ttc = z / ego_state.speed     # longitudinal TTC
                 if ttc < self.config.ttc_emergency_threshold:
                     return True
         return False
@@ -303,14 +310,18 @@ class BehaviorPlanner:
         return False
 
     def _check_yield(self, detections: list[Any], waypoints: list[Any]) -> bool:
-        """True if a pedestrian is crossing within yield_pedestrian_dist."""
+        """True only if a pedestrian is in the ego's path within yield distance.
+
+        Gated to pedestrians ahead (z>0) and near the lane (|x|<3 m) so that
+        people on the sidewalk don't latch the ego to a permanent stop.
+        """
         for det in detections:
             if det.class_name != "person":
                 continue
             if det.center_3d is None:
                 continue
-            dist = math.sqrt(sum(v**2 for v in det.center_3d))
-            if dist < self.config.yield_pedestrian_dist:
+            x, _, z = det.center_3d
+            if z > 0 and abs(x) < 3.0 and z < self.config.yield_pedestrian_dist:
                 return True
         return False
 
