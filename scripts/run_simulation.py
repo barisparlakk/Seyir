@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import carla
 import numpy as np
 import requests
+import cv2
 
 from simulation.scenarios.narrow_street        import NarrowStreetScenario
 from simulation.scenarios.unmarked_intersection import UnmarkedIntersectionScenario
@@ -129,6 +130,8 @@ def run(args: argparse.Namespace) -> None:
     tick      = 0
     run_id    = time.strftime("%Y%m%d_%H%M%S")
     agent_history: dict[int, list] = {}   # for trajectory prediction input
+    video_writer = None
+    video_path = LOG_DIR / f"run_{run_id}.mp4"
 
     print(f"\nSeyir running — scenario={args.scenario} seed={args.seed} duration={args.duration}s")
     print(f"Target: {target_wp.transform.location}")
@@ -192,6 +195,15 @@ def run(args: argparse.Namespace) -> None:
             # ── f. Metrics ─────────────────────────────────────────── #
             metrics.record(ego, ctrl, snapshot)
 
+            # ── Video capture (annotated camera) ───────────────────── #
+            if args.save_video and rgb is not None:
+                frame = _annotate_frame(rgb, detections, lanes, behavior, ego_speed)
+                if video_writer is None:
+                    h, w = frame.shape[:2]
+                    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+                    video_writer = cv2.VideoWriter(str(video_path), fourcc, 10.0, (w, h))
+                video_writer.write(frame)
+
             # ── g. Dashboard broadcast ─────────────────────────────── #
             if tick % 2 == 0:   # ~10 Hz broadcast
                 _broadcast_state(ego_state, detections, lanes, behavior, metrics, snapshot)
@@ -220,6 +232,9 @@ def run(args: argparse.Namespace) -> None:
     except KeyboardInterrupt:
         print("\nStopped by user.")
     finally:
+        if video_writer is not None:
+            video_writer.release()
+            print(f"\nVideo saved to {video_path}")
         sensor_manager.destroy()
         metrics.destroy()
         if args.record:
@@ -281,6 +296,40 @@ def _run_prediction(
             torch.from_numpy(ego_np),
         )
     return {"trajectories": trajs.numpy(), "probs": probs.numpy()}
+
+
+def _annotate_frame(
+    rgb: np.ndarray,
+    detections: list,
+    lanes: list,
+    behavior: any,
+    ego_speed: float,
+) -> np.ndarray:
+    """Draw detection boxes, lanes, and a HUD onto the camera frame (BGR for cv2)."""
+    frame = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR).copy()
+
+    # Lane polylines
+    for ln in lanes:
+        pts = getattr(ln, "points", [])
+        color = (0, 165, 255) if getattr(ln, "lane_type", "") == "implicit" else (0, 255, 0)
+        for i in range(1, len(pts)):
+            cv2.line(frame, tuple(pts[i - 1]), tuple(pts[i]), color, 2)
+
+    # Detection boxes
+    for d in detections:
+        x1, y1, x2, y2 = d.bbox
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 80, 0), 2)
+        label = f"{d.class_name} {d.confidence:.2f}"
+        if d.center_3d:
+            label += f" {d.center_3d[2]:.1f}m"
+        cv2.putText(frame, label, (x1, max(0, y1 - 6)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+
+    # HUD bar
+    hud = f"{ego_speed * 3.6:5.1f} km/h | {behavior.state.value.upper()} | {len(detections)} det"
+    cv2.rectangle(frame, (0, 0), (frame.shape[1], 28), (0, 0, 0), -1)
+    cv2.putText(frame, hud, (8, 19), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 120), 2, cv2.LINE_AA)
+    return frame
 
 
 def _build_ref_path(
@@ -368,5 +417,7 @@ if __name__ == "__main__":
     parser.add_argument("--seed",      type=int, default=42)
     parser.add_argument("--duration",  type=int, default=120, help="seconds")
     parser.add_argument("--record",    action="store_true", help="Save metrics JSON")
+    parser.add_argument("--save-video", action="store_true",
+                        help="Save annotated camera feed to logs/run_<id>.mp4")
     parser.add_argument("--no-render", action="store_true", help="Headless mode")
     run(parser.parse_args())
