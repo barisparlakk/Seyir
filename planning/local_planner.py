@@ -215,12 +215,15 @@ class MPCLocalPlanner:
 
         x, y, psi, v = ego_state
 
-        # Find lookahead point
+        # Speed-adaptive lookahead: look farther ahead at higher speed so the
+        # steering stays smooth instead of chasing the nearest point and
+        # slamming the wheel. Clamp to a sane range.
+        ld = float(np.clip(lookahead * 0.4 + 0.6 * v, 5.0, 20.0))
+
+        # Find the first reference point at least `ld` ahead of the vehicle
         target = reference_path[-1]
         for pt in reference_path:
-            dx = pt[0] - x
-            dy = pt[1] - y
-            if math.sqrt(dx**2 + dy**2) >= lookahead:
+            if math.sqrt((pt[0] - x) ** 2 + (pt[1] - y) ** 2) >= ld:
                 target = pt
                 break
 
@@ -236,7 +239,11 @@ class MPCLocalPlanner:
         delta = math.atan2(2.0 * self.L * math.sin(alpha), dist)
         delta = float(np.clip(delta, self.DELTA_MIN, self.DELTA_MAX))
 
-        v_ref = target[2] if len(target) >= 3 else self.max_speed * 0.7
+        # Slow down for turns: the sharper the required heading change, the
+        # lower the target speed. Prevents taking a sharp bend at full speed
+        # and being thrown out of the lane.
+        turn_factor = max(0.2, math.cos(alpha))    # 1.0 straight ahead → 0.2 at 90°+
+        v_ref = (target[2] if len(target) >= 3 else self.max_speed * 0.7) * turn_factor
         a = float(np.clip((v_ref - v) * 0.5, self.A_MIN, self.A_MAX))
 
         return delta, a

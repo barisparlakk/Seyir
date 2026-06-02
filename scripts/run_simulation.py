@@ -80,6 +80,17 @@ def run(args: argparse.Namespace) -> None:
     sensor_manager = env["sensor_manager"]
     world          = client.get_world()
 
+    # ── Synchronous mode ───────────────────────────────────────────── #
+    # The control loop must drive the simulation clock; otherwise the world
+    # advances freely during the ~0.5 s perception step and control acts on
+    # stale state, causing unstable steering. Server waits for our world.tick().
+    traffic_manager = client.get_trafficmanager()
+    sync_settings = world.get_settings()
+    sync_settings.synchronous_mode = True
+    sync_settings.fixed_delta_seconds = 0.05   # 20 Hz fixed step
+    world.apply_settings(sync_settings)
+    traffic_manager.set_synchronous_mode(True)
+
     # ── Module initialisation ───────────────────────────────────────── #
     det_ckpt = CKPT_DIR / "detector_best.pt"
     detector = ObjectDetector(
@@ -235,6 +246,17 @@ def run(args: argparse.Namespace) -> None:
         if video_writer is not None:
             video_writer.release()
             print(f"\nVideo saved to {video_path}")
+        # Restore async mode FIRST so the server isn't waiting on ticks while
+        # we tear down — this prevents the hang/wedge and the destroyed-actor
+        # abort caused by sensor callbacks firing during destruction.
+        try:
+            async_settings = world.get_settings()
+            async_settings.synchronous_mode = False
+            async_settings.fixed_delta_seconds = None
+            world.apply_settings(async_settings)
+            traffic_manager.set_synchronous_mode(False)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not restore async mode: %s", exc)
         sensor_manager.destroy()
         metrics.destroy()
         if args.record:
