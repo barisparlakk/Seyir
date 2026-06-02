@@ -258,7 +258,8 @@ def run(args: argparse.Namespace) -> None:
                 print(
                     f"\r  tick {tick}/{max_ticks} ({pct:4.1f}%) | "
                     f"{ego_speed * 3.6:5.1f} km/h | {behavior.state.value:<12} | "
-                    f"{len(detections):2d} det | {elapsed*1000:5.0f} ms/tick | "
+                    f"{len(detections):2d} det | {local_planner.last_solver:<7} | "
+                    f"{elapsed*1000:5.0f} ms/tick | "
                     f"collisions={len(metrics.collisions)}",
                     end="", flush=True,
                 )

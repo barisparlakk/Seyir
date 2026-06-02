@@ -44,7 +44,11 @@ class MPCLocalPlanner:
     A_MIN,     A_MAX     = -5.0, 3.0
     V_MIN                =  0.0
 
-    SOLVE_TIMEOUT_MS = 50.0
+    # Budget for the IPOPT solve. The original 50 ms was too tight on CPU, so
+    # the MPC silently fell back to pure-pursuit every tick (no cross-track
+    # correction → the ego drifted out of its lane). 200 ms lets the MPC
+    # actually run; it's well within the ~0.5 s/tick perception budget.
+    SOLVE_TIMEOUT_MS = 200.0
 
     def __init__(
         self,
@@ -59,6 +63,7 @@ class MPCLocalPlanner:
         self.max_speed = max_speed
         self._prev_delta = 0.0
         self._prev_a     = 0.0
+        self.last_solver = "none"   # "mpc" | "pursuit" — which path solve() took
         self._opti: Any | None = None
         self._build_opti()
         logger.info("MPCLocalPlanner: horizon=%d dt=%.2f L=%.3f", horizon, dt, wheelbase)
@@ -81,6 +86,7 @@ class MPCLocalPlanner:
         t_start = time.perf_counter()
 
         if self._opti is None or len(reference_path) < 2:
+            self.last_solver = "pursuit"
             return self._pure_pursuit(ego_state, reference_path)
 
         try:
@@ -88,11 +94,14 @@ class MPCLocalPlanner:
             elapsed_ms = (time.perf_counter() - t_start) * 1000
             if elapsed_ms > self.SOLVE_TIMEOUT_MS:
                 logger.warning("IPOPT took %.1f ms > threshold; using Pure Pursuit", elapsed_ms)
+                self.last_solver = "pursuit"
                 return self._pure_pursuit(ego_state, reference_path)
             self._prev_delta, self._prev_a = delta, a
+            self.last_solver = "mpc"
             return delta, a
         except Exception as exc:
             logger.warning("IPOPT failed (%s); falling back to Pure Pursuit", exc)
+            self.last_solver = "pursuit"
             return self._pure_pursuit(ego_state, reference_path)
 
     # ------------------------------------------------------------------ #
