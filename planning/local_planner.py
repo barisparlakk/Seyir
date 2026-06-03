@@ -75,7 +75,7 @@ class MPCLocalPlanner:
     def solve(
         self,
         ego_state: np.ndarray,          # [x, y, psi, v]
-        reference_path: list[tuple[float, float, float]],  # [(x, y, v_ref), ...]
+        reference_path: list[tuple[float, float, float, float]],  # [(x, y, psi, v_ref), ...]
         occupancy_grid: np.ndarray | None = None,
     ) -> tuple[float, float]:
         """
@@ -122,7 +122,7 @@ class MPCLocalPlanner:
 
             # Parameters
             x0_p   = opti.parameter(4)    # initial state
-            ref_p  = opti.parameter(3, N) # reference (x_r, y_r, v_r) per step
+            ref_p  = opti.parameter(4, N) # reference (x_r, y_r, psi_r, v_r) per step
 
             # Dynamics constraints (bicycle model)
             opti.subject_to(X[:, 0] == x0_p)
@@ -149,9 +149,11 @@ class MPCLocalPlanner:
             # Cost function
             cost = 0.0
             for k in range(N):
-                x_r   = ref_p[0, k]; y_r = ref_p[1, k]; v_r = ref_p[2, k]
+                x_r = ref_p[0, k]; y_r = ref_p[1, k]
+                psi_r = ref_p[2, k]; v_r = ref_p[3, k]
                 cte   = (X[0, k] - x_r)**2 + (X[1, k] - y_r)**2
-                epsi  = (X[2, k])**2
+                heading_err = ca.atan2(ca.sin(X[2, k] - psi_r), ca.cos(X[2, k] - psi_r))
+                epsi  = heading_err**2
                 cost += (self.W_CTE * cte
                          + self.W_EPSI * epsi
                          + self.W_V * (X[3, k] - v_r)**2
@@ -184,15 +186,19 @@ class MPCLocalPlanner:
     def _solve_ipopt(
         self,
         ego_state: np.ndarray,
-        reference_path: list[tuple[float, float, float]],
+        reference_path: list[tuple[float, float, float, float]],
     ) -> tuple[float, float]:
         import casadi as ca
 
-        # Build reference matrix (3, N)
-        ref = np.zeros((3, self.N))
+        # Build reference matrix (4, N)
+        ref = np.zeros((4, self.N))
         for k in range(self.N):
             idx = min(k, len(reference_path) - 1)
-            ref[:, k] = reference_path[idx]
+            pt = reference_path[idx]
+            if len(pt) >= 4:
+                ref[:, k] = pt[:4]
+            else:
+                ref[:, k] = (pt[0], pt[1], ego_state[2], pt[2])
 
         self._opti.set_value(self._x0_p, ego_state)
         self._opti.set_value(self._ref_p, ref)
@@ -212,7 +218,7 @@ class MPCLocalPlanner:
     def _pure_pursuit(
         self,
         ego_state: np.ndarray,
-        reference_path: list[tuple[float, float, float]],
+        reference_path: list[tuple[float, float, float, float]],
         lookahead: float = 8.0,
     ) -> tuple[float, float]:
         """
@@ -252,7 +258,8 @@ class MPCLocalPlanner:
         # lower the target speed. Prevents taking a sharp bend at full speed
         # and being thrown out of the lane.
         turn_factor = max(0.2, math.cos(alpha))    # 1.0 straight ahead → 0.2 at 90°+
-        v_ref = (target[2] if len(target) >= 3 else self.max_speed * 0.7) * turn_factor
+        v_ref_idx = 3 if len(target) >= 4 else 2
+        v_ref = (target[v_ref_idx] if len(target) > v_ref_idx else self.max_speed * 0.7) * turn_factor
         a = float(np.clip((v_ref - v) * 0.5, self.A_MIN, self.A_MAX))
 
         return delta, a

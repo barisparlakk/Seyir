@@ -289,7 +289,14 @@ class BehaviorPlanner:
         if not waypoints:
             return False
         ego_loc = (ego_state.x, ego_state.y)
-        for wp in waypoints[:10]:
+        closest_idx = min(
+            range(len(waypoints)),
+            key=lambda i: (
+                (waypoints[i].transform.location.x - ego_loc[0]) ** 2
+                + (waypoints[i].transform.location.y - ego_loc[1]) ** 2
+            ),
+        )
+        for wp in waypoints[closest_idx:closest_idx + 10]:
             loc = wp.transform.location
             d = math.sqrt((loc.x - ego_loc[0])**2 + (loc.y - ego_loc[1])**2)
             if d < self.config.junction_lookahead and wp.is_junction:

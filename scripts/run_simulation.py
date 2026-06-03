@@ -162,7 +162,8 @@ def run(args: argparse.Namespace) -> None:
     telemetry_path = LOG_DIR / f"telemetry_{run_id}.csv"
     telemetry_file = open(telemetry_path, "w")
     telemetry_file.write("tick,sim_t,x,y,heading_deg,speed_kmh,state,solver,"
-                         "n_det,steer,accel,target_speed,collisions,ms_tick\n")
+                         "n_det,steer,accel,target_speed,cte,heading_error_deg,"
+                         "collisions,ms_tick\n")
 
     print(f"\nSeyir running — scenario={args.scenario} seed={args.seed} duration={args.duration}s")
     print(f"Target: {target_wp.transform.location}")
@@ -222,6 +223,7 @@ def run(args: argparse.Namespace) -> None:
 
             behavior = behavior_planner.step(ego_state, detections, predictions, waypoints)
             ref_path = _build_ref_path(ego_tf, waypoints, behavior.target_speed)
+            cte, heading_error = _route_tracking_error(ego_tf, ref_path)
             state_vec = np.array([
                 ego_tf.location.x, ego_tf.location.y,
                 math.radians(ego_tf.rotation.yaw), ego_speed,
@@ -266,7 +268,8 @@ def run(args: argparse.Namespace) -> None:
                 f"{ego_tf.rotation.yaw:.1f},{ego_speed*3.6:.2f},"
                 f"{behavior.state.value},{local_planner.last_solver},"
                 f"{len(detections)},{steer:.4f},{accel:.3f},"
-                f"{behavior.target_speed:.2f},{len(metrics.collisions)},{elapsed*1000:.0f}\n"
+                f"{behavior.target_speed:.2f},{cte:.3f},{math.degrees(heading_error):.1f},"
+                f"{len(metrics.collisions)},{elapsed*1000:.0f}\n"
             )
             telemetry_file.flush()
             # Live progress line (overwrites in place)
@@ -407,16 +410,18 @@ def _build_ref_path(
     waypoints: list,
     target_speed: float,
     lookahead_n: int = 20,
-) -> list[tuple[float, float, float]]:
+) -> list[tuple[float, float, float, float]]:
+    import math
+
     if not waypoints:
         # Dead-reckoning fallback: go straight
-        import math
         yaw = math.radians(ego_tf.rotation.yaw)
         ref = []
         for i in range(1, lookahead_n + 1):
             ref.append((
                 ego_tf.location.x + i * 2.0 * math.cos(yaw),
                 ego_tf.location.y + i * 2.0 * math.sin(yaw),
+                yaw,
                 target_speed,
             ))
         return ref
@@ -429,9 +434,36 @@ def _build_ref_path(
         ),
     )
     ref = []
-    for wp in waypoints[closest_idx:closest_idx + lookahead_n]:
-        ref.append((wp.transform.location.x, wp.transform.location.y, target_speed))
+    end_idx = min(len(waypoints), closest_idx + lookahead_n)
+    for i in range(closest_idx, end_idx):
+        wp = waypoints[i]
+        loc = wp.transform.location
+        if i + 1 < len(waypoints):
+            next_loc = waypoints[i + 1].transform.location
+            yaw = math.atan2(next_loc.y - loc.y, next_loc.x - loc.x)
+        else:
+            yaw = math.radians(wp.transform.rotation.yaw)
+        ref.append((loc.x, loc.y, yaw, target_speed))
     return ref
+
+
+def _route_tracking_error(
+    ego_tf: carla.Transform,
+    ref_path: list[tuple[float, float, float, float]],
+) -> tuple[float, float]:
+    if not ref_path:
+        return 0.0, 0.0
+
+    import math
+
+    x = ego_tf.location.x
+    y = ego_tf.location.y
+    ego_yaw = math.radians(ego_tf.rotation.yaw)
+    nearest = min(ref_path, key=lambda pt: (pt[0] - x) ** 2 + (pt[1] - y) ** 2)
+    cte = math.hypot(nearest[0] - x, nearest[1] - y)
+    heading_error = ego_yaw - nearest[2]
+    heading_error = (heading_error + math.pi) % (2 * math.pi) - math.pi
+    return cte, heading_error
 
 
 def _broadcast_state(
