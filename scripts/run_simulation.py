@@ -157,6 +157,13 @@ def run(args: argparse.Namespace) -> None:
     video_writer = None
     video_path = LOG_DIR / f"run_{run_id}.mp4"
 
+    # Per-tick telemetry CSV so we can review the whole run trajectory after
+    # the fact (the live \r progress line only shows the latest tick).
+    telemetry_path = LOG_DIR / f"telemetry_{run_id}.csv"
+    telemetry_file = open(telemetry_path, "w")
+    telemetry_file.write("tick,sim_t,x,y,heading_deg,speed_kmh,state,solver,"
+                         "n_det,steer,accel,target_speed,collisions,ms_tick\n")
+
     print(f"\nSeyir running — scenario={args.scenario} seed={args.seed} duration={args.duration}s")
     print(f"Target: {target_wp.transform.location}")
     print("Press Ctrl-C to stop.\n")
@@ -252,6 +259,16 @@ def run(args: argparse.Namespace) -> None:
             # Timing
             tick += 1
             elapsed = time.perf_counter() - t0
+            # Telemetry row every tick (full run history for post-hoc review)
+            telemetry_file.write(
+                f"{tick},{snapshot.timestamp.elapsed_seconds:.2f},"
+                f"{ego_tf.location.x:.2f},{ego_tf.location.y:.2f},"
+                f"{ego_tf.rotation.yaw:.1f},{ego_speed*3.6:.2f},"
+                f"{behavior.state.value},{local_planner.last_solver},"
+                f"{len(detections)},{steer:.4f},{accel:.3f},"
+                f"{behavior.target_speed:.2f},{len(metrics.collisions)},{elapsed*1000:.0f}\n"
+            )
+            telemetry_file.flush()
             # Live progress line (overwrites in place)
             if tick % 5 == 0:
                 pct = 100.0 * tick / max(1, max_ticks)
@@ -269,6 +286,11 @@ def run(args: argparse.Namespace) -> None:
     except KeyboardInterrupt:
         print("\nStopped by user.")
     finally:
+        try:
+            telemetry_file.close()
+            print(f"\nTelemetry saved to {telemetry_path}")
+        except Exception:
+            pass
         if video_writer is not None:
             video_writer.release()
             print(f"\nVideo saved to {video_path}")
