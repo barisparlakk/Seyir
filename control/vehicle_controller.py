@@ -91,6 +91,7 @@ class VehicleController:
         self,
         target_speed: float,       # m/s
         steering_angle: float,     # radians (from MPC)
+        acceleration: float | None = None,  # m/s^2 (from MPC)
     ) -> Any:                      # carla.VehicleControl
         """Compute and apply the CARLA vehicle control. Returns the control object."""
         import carla
@@ -99,6 +100,14 @@ class VehicleController:
         current_speed = (vel.x**2 + vel.y**2 + vel.z**2) ** 0.5
 
         throttle, brake = self.long_pid.step(target_speed, current_speed)
+        if acceleration is not None:
+            accel = float(acceleration)
+            if accel >= 0.0:
+                throttle = max(throttle, min(1.0, accel / 3.0))
+                brake = 0.0
+            else:
+                throttle = 0.0
+                brake = max(brake, min(1.0, -accel / 5.0))
         steer = float(
             max(-1.0, min(1.0, steering_angle / self.MAX_STEER_RAD))
         )

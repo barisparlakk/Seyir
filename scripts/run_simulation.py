@@ -146,6 +146,8 @@ def run(args: argparse.Namespace) -> None:
         route_len += ((a.x - b.x) ** 2 + (a.y - b.y) ** 2) ** 0.5
     metrics.set_route_length(max(route_len, 1.0))
     logger.info("Route: %d waypoints, %.1f m", len(waypoints), route_len)
+    route_path = LOG_DIR / f"route_{time.strftime('%Y%m%d_%H%M%S')}.csv"
+    _write_route_debug(route_path, waypoints)
 
     # ── Main loop ──────────────────────────────────────────────────── #
     loop_hz   = 20
@@ -235,7 +237,7 @@ def run(args: argparse.Namespace) -> None:
                 controller.emergency_stop()
                 ctrl = ego.get_control()
             else:
-                ctrl = controller.apply(behavior.target_speed, steer)
+                ctrl = controller.apply(behavior.target_speed, steer, accel)
 
             # ── f. Metrics ─────────────────────────────────────────── #
             metrics.record(ego, ctrl, snapshot)
@@ -279,6 +281,8 @@ def run(args: argparse.Namespace) -> None:
                     f"\r  tick {tick}/{max_ticks} ({pct:4.1f}%) | "
                     f"{ego_speed * 3.6:5.1f} km/h | {behavior.state.value:<12} | "
                     f"{len(detections):2d} det | {local_planner.last_solver:<7} | "
+                    f"cte={cte:4.1f}m herr={math.degrees(heading_error):5.1f}deg "
+                    f"steer={steer:5.2f} | "
                     f"{elapsed*1000:5.0f} ms/tick | "
                     f"collisions={len(metrics.collisions)}",
                     end="", flush=True,
@@ -464,6 +468,23 @@ def _route_tracking_error(
     heading_error = ego_yaw - nearest[2]
     heading_error = (heading_error + math.pi) % (2 * math.pi) - math.pi
     return cte, heading_error
+
+
+def _write_route_debug(path: Path, waypoints: list) -> None:
+    try:
+        with open(path, "w") as f:
+            f.write("idx,x,y,yaw_deg,is_junction,road_id,lane_id\n")
+            for i, wp in enumerate(waypoints):
+                loc = wp.transform.location
+                rot = wp.transform.rotation
+                f.write(
+                    f"{i},{loc.x:.3f},{loc.y:.3f},{rot.yaw:.1f},"
+                    f"{int(bool(wp.is_junction))},"
+                    f"{getattr(wp, 'road_id', '')},{getattr(wp, 'lane_id', '')}\n"
+                )
+        print(f"Route debug saved to {path}")
+    except Exception as exc:
+        logger.warning("Could not write route debug CSV: %s", exc)
 
 
 def _broadcast_state(
