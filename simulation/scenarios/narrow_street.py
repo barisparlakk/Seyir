@@ -57,11 +57,15 @@ class NarrowStreetScenario:
         from simulation.agents.pedestrian import PedestrianAgent
 
         no_traffic = os.getenv("SEYIR_NO_TRAFFIC", "0") == "1"
+        use_current_map = os.getenv("SEYIR_USE_CURRENT_MAP", "0") == "1"
         self.client.set_timeout(120.0)
         print(f"Setting up {self.MAP_NAME} scenario...", flush=True)
         current_world = self.client.get_world()
         current_map = current_world.get_map().name
-        if current_map.endswith(self.MAP_NAME):
+        if use_current_map:
+            print(f"Using already loaded world: {current_map}", flush=True)
+            world = current_world
+        elif current_map.endswith(self.MAP_NAME):
             print(f"Reloading existing {self.MAP_NAME} world...", flush=True)
             world = self.client.reload_world(False)
         else:
