@@ -28,6 +28,7 @@ class NarrowStreetScenario:
     N_TURKISH_DRIVERS = 6
     N_MOTORCYCLISTS = 2
     N_PEDESTRIANS = 4
+    DEFAULT_ROUTE_METERS = 350.0
     WEATHER_OPTIONS = ["ClearNoon", "CloudyNoon", "WetNoon", "HardRainNoon"]
 
     def __init__(self, client: Any, seed: int = 42) -> None:
@@ -183,8 +184,10 @@ class NarrowStreetScenario:
         # was snapping nodes and routing the ego into a U-turn at the start).
         route_wps: list[Any] = [ego_wp]
         cursor = ego_wp
-        for _ in range(75):   # 75 * 2 m ≈ 150 m
-            nxts = cursor.next(2.0)
+        route_step_m = 2.0
+        route_m = float(os.getenv("SEYIR_ROUTE_METERS", self.DEFAULT_ROUTE_METERS))
+        for _ in range(max(1, int(route_m / route_step_m))):
+            nxts = cursor.next(route_step_m)
             if not nxts:
                 break
             cursor = nxts[0]
