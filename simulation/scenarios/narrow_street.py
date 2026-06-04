@@ -56,14 +56,24 @@ class NarrowStreetScenario:
         from simulation.agents.pedestrian import PedestrianAgent
 
         self.client.set_timeout(120.0)
-        self.client.load_world(self.MAP_NAME)
+        print(f"Setting up {self.MAP_NAME} scenario...", flush=True)
+        current_world = self.client.get_world()
+        current_map = current_world.get_map().name
+        if current_map.endswith(self.MAP_NAME):
+            print(f"Reloading existing {self.MAP_NAME} world...", flush=True)
+            world = self.client.reload_world(False)
+        else:
+            print(f"Loading {self.MAP_NAME} world from {current_map}...", flush=True)
+            world = self.client.load_world(self.MAP_NAME)
         world = self.client.get_world()
         try:
             world.wait_for_tick(30.0)
         except Exception:
             pass
+        print(f"World ready: {world.get_map().name}", flush=True)
         self._apply_weather(world)
 
+        print("Configuring Traffic Manager...", flush=True)
         tm = self.client.get_trafficmanager(8000)
         tm.set_global_distance_to_leading_vehicle(2.5)
         tm.set_random_device_seed(self.seed)
