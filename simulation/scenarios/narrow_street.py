@@ -5,6 +5,7 @@ Turkish NPC drivers, motorcyclists, and jaywalking pedestrians.
 from __future__ import annotations
 
 import logging
+import os
 import random
 import time
 from pathlib import Path
@@ -55,6 +56,7 @@ class NarrowStreetScenario:
         from simulation.agents.motorcyclist import MotorcyclistAgent
         from simulation.agents.pedestrian import PedestrianAgent
 
+        no_traffic = os.getenv("SEYIR_NO_TRAFFIC", "0") == "1"
         self.client.set_timeout(120.0)
         print(f"Setting up {self.MAP_NAME} scenario...", flush=True)
         current_world = self.client.get_world()
@@ -73,10 +75,14 @@ class NarrowStreetScenario:
         print(f"World ready: {world.get_map().name}", flush=True)
         self._apply_weather(world)
 
-        print("Configuring Traffic Manager...", flush=True)
-        tm = self.client.get_trafficmanager(8000)
-        tm.set_global_distance_to_leading_vehicle(2.5)
-        tm.set_random_device_seed(self.seed)
+        tm = None
+        if no_traffic:
+            print("Skipping Traffic Manager and dynamic actors.", flush=True)
+        else:
+            print("Configuring Traffic Manager...", flush=True)
+            tm = self.client.get_trafficmanager(8000)
+            tm.set_global_distance_to_leading_vehicle(2.5)
+            tm.set_random_device_seed(self.seed)
 
         spawn_points = world.get_map().get_spawn_points()
         self._rng.shuffle(spawn_points)
@@ -104,7 +110,10 @@ class NarrowStreetScenario:
         import carla as _carla
         carla_map = world.get_map()
         ego_wp = carla_map.get_waypoint(ego_spawn.location)
-        n_needed = self.N_TURKISH_DRIVERS + self.N_MOTORCYCLISTS
+        n_drivers = 0 if no_traffic else self.N_TURKISH_DRIVERS
+        n_motorcyclists = 0 if no_traffic else self.N_MOTORCYCLISTS
+        n_pedestrians = 0 if no_traffic else self.N_PEDESTRIANS
+        n_needed = n_drivers + n_motorcyclists
         ahead_points: list[Any] = []
         cursor = ego_wp
         gap = 25.0
@@ -136,7 +145,7 @@ class NarrowStreetScenario:
         # not just rely on spawn-time Traffic Manager settings.
         npc_vehicles: list[Any] = []
         npc_agents: list[Any] = []
-        for i in range(self.N_TURKISH_DRIVERS):
+        for i in range(n_drivers):
             agent = TurkishDriverAgent(tm, seed=self.seed + i)
             v = agent.spawn(world, ahead_points[i])
             if v:
@@ -145,9 +154,9 @@ class NarrowStreetScenario:
                 self._actors.append(v)
 
         # Motorcyclists (placed further ahead)
-        for i in range(self.N_MOTORCYCLISTS):
+        for i in range(n_motorcyclists):
             agent = MotorcyclistAgent(tm, seed=self.seed + 100 + i)
-            v = agent.spawn(world, ahead_points[self.N_TURKISH_DRIVERS + i])
+            v = agent.spawn(world, ahead_points[n_drivers + i])
             if v:
                 npc_vehicles.append(v)
                 npc_agents.append(agent)
@@ -156,7 +165,7 @@ class NarrowStreetScenario:
         # Pedestrians — spawned on the navigation mesh (valid sidewalk points)
         pedestrians: list[Any] = []
         ped_agents: list[Any] = []
-        for i in range(self.N_PEDESTRIANS):
+        for i in range(n_pedestrians):
             pa = PedestrianAgent(seed=self.seed + 200 + i)
             w = pa.spawn(world)
             if w:
