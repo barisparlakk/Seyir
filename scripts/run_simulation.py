@@ -60,7 +60,7 @@ def build_camera_matrix(fov: float, width: int, height: int) -> np.ndarray:
 
 def run(args: argparse.Namespace) -> None:
     client = carla.Client(args.host, args.port)
-    client.set_timeout(20.0)
+    client.set_timeout(120.0)
 
     if args.no_render:
         settings = client.get_world().get_settings()

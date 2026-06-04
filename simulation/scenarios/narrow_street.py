@@ -55,8 +55,13 @@ class NarrowStreetScenario:
         from simulation.agents.motorcyclist import MotorcyclistAgent
         from simulation.agents.pedestrian import PedestrianAgent
 
+        self.client.set_timeout(120.0)
         self.client.load_world(self.MAP_NAME)
         world = self.client.get_world()
+        try:
+            world.wait_for_tick(30.0)
+        except Exception:
+            pass
         self._apply_weather(world)
 
         tm = self.client.get_trafficmanager(8000)
