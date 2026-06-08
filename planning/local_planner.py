@@ -2,7 +2,7 @@
 MPCLocalPlanner: Model Predictive Control using a bicycle kinematic model.
 
 Solved with CasADi / IPOPT. Falls back to Pure Pursuit if solve time
-exceeds 50 ms.
+exceeds the configured solve budget.
 """
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ class MPCLocalPlanner:
     Control: [delta (steering), a (acceleration)]
 
     On each call to solve(), returns only the first control action.
-    Falls back to Pure Pursuit if IPOPT exceeds 50 ms.
+    Falls back to Pure Pursuit if IPOPT exceeds the configured solve budget.
     """
 
     # Cost weights
@@ -188,8 +188,6 @@ class MPCLocalPlanner:
         ego_state: np.ndarray,
         reference_path: list[tuple[float, float, float, float]],
     ) -> tuple[float, float]:
-        import casadi as ca
-
         # Build reference matrix (4, N)
         ref = np.zeros((4, self.N))
         for k in range(self.N):
@@ -270,6 +268,6 @@ if __name__ == "__main__":
 
     planner = MPCLocalPlanner(horizon=10, dt=0.1)
     ego = np.array([0.0, 0.0, 0.0, 5.0])
-    path = [(float(i * 2), 0.0, 8.0) for i in range(20)]
+    path = [(float(i * 2), 0.0, 0.0, 8.0) for i in range(20)]
     delta, a = planner.solve(ego, path)
     print(f"MPCLocalPlanner smoke test: delta={delta:.4f} rad, a={a:.4f} m/s² — OK")

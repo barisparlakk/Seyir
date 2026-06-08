@@ -7,7 +7,6 @@ VehicleController combines PID longitudinal control with MPC lateral control.
 from __future__ import annotations
 
 import logging
-import time
 from pathlib import Path
 from typing import Any
 
@@ -127,7 +126,6 @@ class VehicleController:
         """Full brake, zero throttle, hold steering."""
         import carla
 
-        vel = self.vehicle.get_velocity()
         # Read current steer to hold direction during braking
         prev_ctrl = self.vehicle.get_control()
         ctrl = carla.VehicleControl(

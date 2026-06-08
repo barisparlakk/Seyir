@@ -7,7 +7,6 @@ from __future__ import annotations
 import logging
 import os
 import random
-import time
 from pathlib import Path
 from typing import Any
 
@@ -57,8 +56,8 @@ class NarrowStreetScenario:
         from simulation.agents.motorcyclist import MotorcyclistAgent
         from simulation.agents.pedestrian import PedestrianAgent
 
-        no_traffic = os.getenv("SEYIR_NO_TRAFFIC", "0") == "1"
-        use_current_map = os.getenv("SEYIR_USE_CURRENT_MAP", "0") == "1"
+        no_traffic = _env_flag("SEYIR_NO_TRAFFIC")
+        use_current_map = _env_flag("SEYIR_USE_CURRENT_MAP")
         self.client.set_timeout(120.0)
         print(f"Setting up {self.MAP_NAME} scenario...", flush=True)
         current_world = self.client.get_world()
@@ -185,13 +184,14 @@ class NarrowStreetScenario:
         route_wps: list[Any] = [ego_wp]
         cursor = ego_wp
         route_step_m = 2.0
-        route_m = float(os.getenv("SEYIR_ROUTE_METERS", self.DEFAULT_ROUTE_METERS))
+        route_m = _env_float("SEYIR_ROUTE_METERS", self.DEFAULT_ROUTE_METERS, min_value=route_step_m)
         for _ in range(max(1, int(route_m / route_step_m))):
             nxts = cursor.next(route_step_m)
             if not nxts:
                 break
             cursor = nxts[0]
             route_wps.append(cursor)
+        print(f"Route ready: {len(route_wps)} waypoints, target={route_wps[-1].transform.location}", flush=True)
         self._route_waypoints = route_wps
         self._target_waypoint = route_wps[-1]
 
@@ -268,6 +268,25 @@ class NarrowStreetScenario:
 
     def __del__(self) -> None:
         self._teardown()
+
+
+def _env_flag(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_float(name: str, default: float, min_value: float | None = None) -> float:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        logger.warning("Ignoring invalid %s=%r; using %.1f", name, raw, default)
+        return default
+    if min_value is not None and value < min_value:
+        logger.warning("Ignoring too-small %s=%.1f; using %.1f", name, value, default)
+        return default
+    return value
 
 
 if __name__ == "__main__":

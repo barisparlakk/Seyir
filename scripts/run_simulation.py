@@ -8,11 +8,12 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import asyncio
 import logging
+import os
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -61,6 +62,7 @@ def build_camera_matrix(fov: float, width: int, height: int) -> np.ndarray:
 def run(args: argparse.Namespace) -> None:
     client = carla.Client(args.host, args.port)
     client.set_timeout(120.0)
+    no_traffic = os.getenv("SEYIR_NO_TRAFFIC", "0") == "1"
 
     if args.no_render:
         settings = client.get_world().get_settings()
@@ -86,12 +88,13 @@ def run(args: argparse.Namespace) -> None:
     # The control loop must drive the simulation clock; otherwise the world
     # advances freely during the ~0.5 s perception step and control acts on
     # stale state, causing unstable steering. Server waits for our world.tick().
-    traffic_manager = client.get_trafficmanager()
+    traffic_manager = None if no_traffic else client.get_trafficmanager()
     sync_settings = world.get_settings()
     sync_settings.synchronous_mode = True
     sync_settings.fixed_delta_seconds = 0.05   # 20 Hz fixed step
     world.apply_settings(sync_settings)
-    traffic_manager.set_synchronous_mode(True)
+    if traffic_manager is not None:
+        traffic_manager.set_synchronous_mode(True)
 
     # ── Module initialisation ───────────────────────────────────────── #
     det_ckpt = CKPT_DIR / "detector_best.pt"
@@ -309,7 +312,8 @@ def run(args: argparse.Namespace) -> None:
             async_settings.synchronous_mode = False
             async_settings.fixed_delta_seconds = None
             world.apply_settings(async_settings)
-            traffic_manager.set_synchronous_mode(False)
+            if traffic_manager is not None:
+                traffic_manager.set_synchronous_mode(False)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Could not restore async mode: %s", exc)
         sensor_manager.destroy()
@@ -379,7 +383,7 @@ def _annotate_frame(
     rgb: np.ndarray,
     detections: list,
     lanes: list,
-    behavior: any,
+    behavior: Any,
     ego_speed: float,
 ) -> np.ndarray:
     """Draw detection boxes, lanes, and a HUD onto the camera frame (BGR for cv2)."""
@@ -491,9 +495,9 @@ def _broadcast_state(
     ego: EgoState,
     detections: list,
     lanes: list,
-    behavior: any,
+    behavior: Any,
     metrics: MetricsCollector,
-    snapshot: any,
+    snapshot: Any,
 ) -> None:
     try:
         import math
