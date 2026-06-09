@@ -56,12 +56,15 @@ class PedestrianAgent:
         if bp.has_attribute("is_invincible"):
             bp.set_attribute("is_invincible", "false")
 
-        # Pick a valid navmesh spawn location (retry a few times).
+        # Pick a valid navmesh spawn location (retry a few times). A caller can
+        # provide a preferred Transform/Location, but CARLA walkers still need
+        # to land on the navigation mesh; fall back to random navmesh points.
         walker = None
-        for _ in range(10):
-            loc = world.get_random_location_from_navigation()
+        preferred_loc = getattr(spawn_point, "location", spawn_point)
+        for attempt in range(10):
+            loc = preferred_loc if attempt == 0 and preferred_loc is not None else world.get_random_location_from_navigation()
             if loc is None:
-                break
+                continue
             try:
                 walker = world.spawn_actor(bp, carla.Transform(loc))
                 break

@@ -451,8 +451,30 @@ def _build_ref_path(
             yaw = math.atan2(next_loc.y - loc.y, next_loc.x - loc.x)
         else:
             yaw = math.radians(wp.transform.rotation.yaw)
-        ref.append((loc.x, loc.y, yaw, target_speed))
+        ref_speed = _curvature_speed(target_speed, waypoints, i, yaw)
+        ref.append((loc.x, loc.y, yaw, ref_speed))
     return ref
+
+
+def _curvature_speed(target_speed: float, waypoints: list, idx: int, yaw: float) -> float:
+    import math
+
+    max_delta = 0.0
+    end_idx = min(len(waypoints), idx + 6)
+    prev_yaw = yaw
+    for j in range(idx + 1, end_idx):
+        rot_yaw = math.radians(waypoints[j].transform.rotation.yaw)
+        delta = abs((rot_yaw - prev_yaw + math.pi) % (2 * math.pi) - math.pi)
+        max_delta = max(max_delta, delta)
+        prev_yaw = rot_yaw
+
+    if bool(getattr(waypoints[idx], "is_junction", False)):
+        return min(target_speed, 6.0)
+    if max_delta > math.radians(20.0):
+        return min(target_speed, 5.0)
+    if max_delta > math.radians(10.0):
+        return min(target_speed, 7.5)
+    return target_speed
 
 
 def _route_tracking_error(

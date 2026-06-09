@@ -28,7 +28,7 @@ class NarrowStreetScenario:
     N_TURKISH_DRIVERS = 6
     N_MOTORCYCLISTS = 2
     N_PEDESTRIANS = 4
-    DEFAULT_ROUTE_METERS = 350.0
+    DEFAULT_ROUTE_METERS = 220.0
     WEATHER_OPTIONS = ["ClearNoon", "CloudyNoon", "WetNoon", "HardRainNoon"]
 
     def __init__(self, client: Any, seed: int = 42) -> None:
@@ -115,9 +115,9 @@ class NarrowStreetScenario:
         import carla as _carla
         carla_map = world.get_map()
         ego_wp = carla_map.get_waypoint(ego_spawn.location)
-        n_drivers = 0 if no_traffic else self.N_TURKISH_DRIVERS
-        n_motorcyclists = 0 if no_traffic else self.N_MOTORCYCLISTS
-        n_pedestrians = 0 if no_traffic else self.N_PEDESTRIANS
+        n_drivers = 0 if no_traffic else _env_int("SEYIR_N_DRIVERS", self.N_TURKISH_DRIVERS, min_value=0)
+        n_motorcyclists = 0 if no_traffic else _env_int("SEYIR_N_MOTORCYCLISTS", self.N_MOTORCYCLISTS, min_value=0)
+        n_pedestrians = 0 if no_traffic else _env_int("SEYIR_N_PEDESTRIANS", self.N_PEDESTRIANS, min_value=0)
         n_needed = n_drivers + n_motorcyclists
         ahead_points: list[Any] = []
         cursor = ego_wp
@@ -167,31 +167,22 @@ class NarrowStreetScenario:
                 npc_agents.append(agent)
                 self._actors.append(v)
 
+        route_m = _env_float("SEYIR_ROUTE_METERS", self.DEFAULT_ROUTE_METERS, min_value=80.0)
+        route_wps = _build_maneuver_route(ego_wp, route_m)
+
         # Pedestrians — spawned on the navigation mesh (valid sidewalk points)
         pedestrians: list[Any] = []
         ped_agents: list[Any] = []
+        ped_spawn_points = _pedestrian_spawn_points(route_wps, n_pedestrians)
         for i in range(n_pedestrians):
             pa = PedestrianAgent(seed=self.seed + 200 + i)
-            w = pa.spawn(world)
+            w = pa.spawn(world, ped_spawn_points[i] if i < len(ped_spawn_points) else None)
             if w:
                 pedestrians.append(w)
                 ped_agents.append(pa)
                 self._actors.append(w)
         self._ped_agents = ped_agents
 
-        # Build a forward lane-following route by walking the ego's lane ahead.
-        # We hand this to the controller directly (instead of global A*, which
-        # was snapping nodes and routing the ego into a U-turn at the start).
-        route_wps: list[Any] = [ego_wp]
-        cursor = ego_wp
-        route_step_m = 2.0
-        route_m = _env_float("SEYIR_ROUTE_METERS", self.DEFAULT_ROUTE_METERS, min_value=route_step_m)
-        for _ in range(max(1, int(route_m / route_step_m))):
-            nxts = cursor.next(route_step_m)
-            if not nxts:
-                break
-            cursor = _choose_route_waypoint(cursor, nxts)
-            route_wps.append(cursor)
         print(f"Route ready: {len(route_wps)} waypoints, target={route_wps[-1].transform.location}", flush=True)
         self._route_waypoints = route_wps
         self._target_waypoint = route_wps[-1]
@@ -288,6 +279,146 @@ def _env_float(name: str, default: float, min_value: float | None = None) -> flo
         logger.warning("Ignoring too-small %s=%.1f; using %.1f", name, value, default)
         return default
     return value
+
+
+def _env_int(name: str, default: int, min_value: int | None = None) -> int:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("Ignoring invalid %s=%r; using %d", name, raw, default)
+        return default
+    if min_value is not None and value < min_value:
+        logger.warning("Ignoring too-small %s=%d; using %d", name, value, default)
+        return default
+    return value
+
+
+def _build_maneuver_route(start_wp: Any, route_m: float, step_m: float = 2.0) -> list[Any]:
+    route: list[Any] = [start_wp]
+    cursor = start_wp
+
+    cursor = _append_forward(route, cursor, min(50.0, route_m * 0.25), step_m)
+
+    changed = _append_lane_change(route, cursor, distance_m=35.0, step_m=step_m)
+    if changed is not None:
+        cursor = changed
+
+    cursor = _append_forward(route, cursor, 25.0, step_m)
+
+    turned = _append_intersection_turn(route, cursor, search_m=90.0, exit_m=70.0, step_m=step_m)
+    if turned is not None:
+        cursor = turned
+
+    current_len = _route_length(route)
+    if current_len < route_m:
+        _append_forward(route, cursor, route_m - current_len, step_m)
+
+    return route
+
+
+def _append_forward(route: list[Any], cursor: Any, distance_m: float, step_m: float) -> Any:
+    for _ in range(max(0, int(distance_m / step_m))):
+        nxts = cursor.next(step_m)
+        if not nxts:
+            break
+        cursor = _choose_route_waypoint(cursor, nxts)
+        route.append(cursor)
+    return cursor
+
+
+def _append_lane_change(route: list[Any], cursor: Any, distance_m: float, step_m: float) -> Any | None:
+    target_lane = _adjacent_driving_lane(cursor)
+    if target_lane is None:
+        return None
+
+    target_cursor = target_lane
+    for _ in range(max(1, int(distance_m / step_m))):
+        nxts = target_cursor.next(step_m)
+        if not nxts:
+            break
+        target_cursor = _choose_route_waypoint(target_cursor, nxts)
+        route.append(target_cursor)
+    return target_cursor
+
+
+def _append_intersection_turn(
+    route: list[Any],
+    cursor: Any,
+    search_m: float,
+    exit_m: float,
+    step_m: float,
+) -> Any | None:
+    travelled = 0.0
+    while travelled < search_m:
+        nxts = cursor.next(step_m)
+        if not nxts:
+            return None
+        if len(nxts) > 1 or any(bool(getattr(wp, "is_junction", False)) for wp in nxts):
+            turn = _choose_turn_waypoint(cursor, nxts)
+            route.append(turn)
+            cursor = turn
+            return _append_forward(route, cursor, exit_m, step_m)
+        cursor = _choose_route_waypoint(cursor, nxts)
+        route.append(cursor)
+        travelled += step_m
+    return None
+
+
+def _adjacent_driving_lane(wp: Any) -> Any | None:
+    for getter in ("get_left_lane", "get_right_lane"):
+        try:
+            lane = getattr(wp, getter)()
+        except Exception:
+            lane = None
+        if lane is not None and str(getattr(lane, "lane_type", "")).endswith("Driving"):
+            return lane
+    return None
+
+
+def _choose_turn_waypoint(current: Any, candidates: list[Any]) -> Any:
+    current_yaw = math.radians(current.transform.rotation.yaw)
+    turn_candidates: list[tuple[float, Any]] = []
+    for wp in candidates:
+        yaw = math.radians(wp.transform.rotation.yaw)
+        yaw_delta = (yaw - current_yaw + math.pi) % (2 * math.pi) - math.pi
+        abs_delta = abs(yaw_delta)
+        if math.radians(25.0) <= abs_delta <= math.radians(135.0):
+            turn_candidates.append((abs(abs_delta - math.radians(70.0)), wp))
+    if turn_candidates:
+        return min(turn_candidates, key=lambda item: item[0])[1]
+    return _choose_route_waypoint(current, candidates)
+
+
+def _route_length(route: list[Any]) -> float:
+    total = 0.0
+    for i in range(1, len(route)):
+        a = route[i - 1].transform.location
+        b = route[i].transform.location
+        total += math.hypot(a.x - b.x, a.y - b.y)
+    return total
+
+
+def _pedestrian_spawn_points(route: list[Any], count: int) -> list[Any]:
+    if count <= 0 or not route:
+        return []
+
+    points = []
+    fractions = [0.5] if count == 1 else [0.25 + 0.5 * i / (count - 1) for i in range(count)]
+    for frac in fractions:
+        idx = min(len(route) - 1, max(0, int(frac * (len(route) - 1))))
+        wp = route[idx]
+        loc = wp.transform.location
+        yaw = math.radians(wp.transform.rotation.yaw)
+        side = -1.0 if len(points) % 2 == 0 else 1.0
+        offset = 5.0 * side
+        lateral_x = -math.sin(yaw) * offset
+        lateral_y = math.cos(yaw) * offset
+        loc_cls = loc.__class__
+        points.append(loc_cls(x=loc.x + lateral_x, y=loc.y + lateral_y, z=loc.z + 0.2))
+    return points
 
 
 def _choose_route_waypoint(current: Any, candidates: list[Any]) -> Any:
