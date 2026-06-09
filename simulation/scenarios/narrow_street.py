@@ -91,10 +91,12 @@ class NarrowStreetScenario:
 
         spawn_points = world.get_map().get_spawn_points()
         self._rng.shuffle(spawn_points)
+        carla_map = world.get_map()
+        route_m = _env_float("SEYIR_ROUTE_METERS", self.DEFAULT_ROUTE_METERS, min_value=80.0)
+        ego_spawn, ego_wp, route_wps = _select_ego_route(carla_map, spawn_points, route_m)
 
         # Ego vehicle
         bp = world.get_blueprint_library().find("vehicle.lincoln.mkz_2020")
-        ego_spawn = spawn_points[0]
         try:
             self._ego = world.spawn_actor(bp, ego_spawn)
         except Exception as exc:
@@ -113,8 +115,6 @@ class NarrowStreetScenario:
         # Pattern per slot: lane offset cycles current → left → right, with a
         # generous 25 m forward gap so the ego can actually make progress.
         import carla as _carla
-        carla_map = world.get_map()
-        ego_wp = carla_map.get_waypoint(ego_spawn.location)
         n_drivers = 0 if no_traffic else _env_int("SEYIR_N_DRIVERS", self.N_TURKISH_DRIVERS, min_value=0)
         n_motorcyclists = 0 if no_traffic else _env_int("SEYIR_N_MOTORCYCLISTS", self.N_MOTORCYCLISTS, min_value=0)
         n_pedestrians = 0 if no_traffic else _env_int("SEYIR_N_PEDESTRIANS", self.N_PEDESTRIANS, min_value=0)
@@ -166,9 +166,6 @@ class NarrowStreetScenario:
                 npc_vehicles.append(v)
                 npc_agents.append(agent)
                 self._actors.append(v)
-
-        route_m = _env_float("SEYIR_ROUTE_METERS", self.DEFAULT_ROUTE_METERS, min_value=80.0)
-        route_wps = _build_maneuver_route(ego_wp, route_m)
 
         # Pedestrians — spawned on the navigation mesh (valid sidewalk points)
         pedestrians: list[Any] = []
@@ -311,12 +308,69 @@ def _build_maneuver_route(start_wp: Any, route_m: float, step_m: float = 2.0) ->
     turned = _append_intersection_turn(route, cursor, search_m=90.0, exit_m=70.0, step_m=step_m)
     if turned is not None:
         cursor = turned
+    else:
+        return route
 
     current_len = _route_length(route)
     if current_len < route_m:
         _append_forward(route, cursor, route_m - current_len, step_m)
 
     return route
+
+
+def _select_ego_route(carla_map: Any, spawn_points: list[Any], route_m: float) -> tuple[Any, Any, list[Any]]:
+    fallback: tuple[Any, Any, list[Any]] | None = None
+    best: tuple[float, Any, Any, list[Any]] | None = None
+
+    for spawn in spawn_points[:80]:
+        wp = carla_map.get_waypoint(spawn.location)
+        route = _build_maneuver_route(wp, route_m)
+        if fallback is None:
+            fallback = (spawn, wp, route)
+        score = _route_maneuver_score(route)
+        if best is None or score > best[0]:
+            best = (score, spawn, wp, route)
+        if score >= 2.0:
+            print(f"Selected maneuver route from spawn {spawn.location}", flush=True)
+            return spawn, wp, route
+
+    if best is not None and best[0] > 0.0:
+        print(f"Selected best available route score={best[0]:.1f} from spawn {best[1].location}", flush=True)
+        return best[1], best[2], best[3]
+    if fallback is None:
+        raise RuntimeError("No CARLA spawn points available")
+    print("No maneuver-rich route found; using first spawn route.", flush=True)
+    return fallback
+
+
+def _route_maneuver_score(route: list[Any]) -> float:
+    if len(route) < 5:
+        return 0.0
+
+    lane_changes = 0
+    max_yaw_delta = 0.0
+    cumulative_turn = 0.0
+    prev_lane = getattr(route[0], "lane_id", None)
+    prev_yaw = math.radians(route[0].transform.rotation.yaw)
+    for wp in route[1:]:
+        lane = getattr(wp, "lane_id", None)
+        if lane != prev_lane:
+            lane_changes += 1
+        yaw = math.radians(wp.transform.rotation.yaw)
+        delta = abs((yaw - prev_yaw + math.pi) % (2 * math.pi) - math.pi)
+        max_yaw_delta = max(max_yaw_delta, delta)
+        cumulative_turn += delta
+        prev_lane = lane
+        prev_yaw = yaw
+
+    score = 0.0
+    if lane_changes > 0:
+        score += 1.0
+    if max_yaw_delta > math.radians(20.0) or cumulative_turn > math.radians(45.0):
+        score += 1.0
+    if _route_length(route) >= 120.0:
+        score += 0.25
+    return score
 
 
 def _append_forward(route: list[Any], cursor: Any, distance_m: float, step_m: float) -> Any:
@@ -356,13 +410,41 @@ def _append_intersection_turn(
         nxts = cursor.next(step_m)
         if not nxts:
             return None
-        if len(nxts) > 1 or any(bool(getattr(wp, "is_junction", False)) for wp in nxts):
+        if len(nxts) > 1:
             turn = _choose_turn_waypoint(cursor, nxts)
             route.append(turn)
             cursor = turn
             return _append_forward(route, cursor, exit_m, step_m)
+        pre_len = len(route)
         cursor = _choose_route_waypoint(cursor, nxts)
         route.append(cursor)
+        if bool(getattr(cursor, "is_junction", False)):
+            branched = _append_junction_branch(route, cursor, exit_m, step_m)
+            if branched is not None:
+                return branched
+            del route[pre_len:]
+            return None
+        travelled += step_m
+    return None
+
+
+def _append_junction_branch(route: list[Any], cursor: Any, exit_m: float, step_m: float) -> Any | None:
+    travelled = 0.0
+    pending: list[Any] = []
+    while travelled < 40.0:
+        nxts = cursor.next(step_m)
+        if not nxts:
+            return None
+        if len(nxts) > 1:
+            turn = _choose_turn_waypoint(cursor, nxts)
+            route.extend(pending)
+            route.append(turn)
+            return _append_forward(route, turn, exit_m, step_m)
+        candidate = nxts[0]
+        if not bool(getattr(candidate, "is_junction", False)):
+            return None
+        cursor = candidate
+        pending.append(cursor)
         travelled += step_m
     return None
 
