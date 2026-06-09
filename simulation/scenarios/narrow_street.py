@@ -300,10 +300,18 @@ def _choose_route_waypoint(current: Any, candidates: list[Any]) -> Any:
         yaw = math.radians(wp.transform.rotation.yaw)
         yaw_delta = abs((yaw - current_yaw + math.pi) % (2 * math.pi) - math.pi)
         score = yaw_delta
-        if getattr(wp, "lane_id", None) != getattr(current, "lane_id", None):
-            score += 1.0
+        current_lane = getattr(current, "lane_id", None)
+        next_lane = getattr(wp, "lane_id", None)
+        if next_lane != current_lane:
+            score += 1.5
+            if isinstance(current_lane, int) and isinstance(next_lane, int):
+                score += 0.75 * abs(abs(next_lane) - abs(current_lane))
+                if next_lane * current_lane < 0:
+                    score += 4.0
         if getattr(wp, "road_id", None) != getattr(current, "road_id", None):
             score += 0.25
+            if bool(getattr(wp, "is_junction", False)) and not bool(getattr(current, "is_junction", False)):
+                score += 0.75
         if getattr(wp, "lane_type", None) != getattr(current, "lane_type", None):
             score += 2.0
         return score

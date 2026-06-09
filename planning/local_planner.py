@@ -39,6 +39,9 @@ class MPCLocalPlanner:
     W_DDELTA = 20.0
     W_DA    =  5.0
 
+    RECOVERY_CTE_M = 3.0
+    RECOVERY_HEADING_ERR_RAD = math.radians(15.0)
+
     # Control bounds
     DELTA_MIN, DELTA_MAX = -0.6, 0.6
     A_MIN,     A_MAX     = -5.0, 3.0
@@ -88,6 +91,11 @@ class MPCLocalPlanner:
         if self._opti is None or len(reference_path) < 2:
             self.last_solver = "pursuit"
             return self._pure_pursuit(ego_state, reference_path)
+
+        cte, heading_error = self._tracking_error(ego_state, reference_path)
+        if cte > self.RECOVERY_CTE_M or abs(heading_error) > self.RECOVERY_HEADING_ERR_RAD:
+            self.last_solver = "pursuit"
+            return self._pure_pursuit(ego_state, reference_path, lookahead=5.0)
 
         try:
             delta, a = self._solve_ipopt(ego_state, reference_path)
@@ -212,6 +220,18 @@ class MPCLocalPlanner:
     # ------------------------------------------------------------------ #
     # Pure Pursuit fallback
     # ------------------------------------------------------------------ #
+
+    def _tracking_error(
+        self,
+        ego_state: np.ndarray,
+        reference_path: list[tuple[float, float, float, float]],
+    ) -> tuple[float, float]:
+        x, y, psi, _ = ego_state
+        nearest = min(reference_path, key=lambda pt: (pt[0] - x) ** 2 + (pt[1] - y) ** 2)
+        cte = math.hypot(nearest[0] - x, nearest[1] - y)
+        heading_error = psi - nearest[2]
+        heading_error = (heading_error + math.pi) % (2 * math.pi) - math.pi
+        return cte, heading_error
 
     def _pure_pursuit(
         self,
