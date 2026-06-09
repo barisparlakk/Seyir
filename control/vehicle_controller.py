@@ -102,8 +102,8 @@ class VehicleController:
         if acceleration is not None:
             accel = float(acceleration)
             if accel >= 0.0:
-                throttle = max(throttle, min(1.0, accel / 3.0))
-                brake = 0.0
+                if current_speed < target_speed:
+                    throttle = max(throttle, min(1.0, accel / 3.0))
             else:
                 throttle = 0.0
                 brake = max(brake, min(1.0, -accel / 5.0))

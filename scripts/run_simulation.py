@@ -476,13 +476,20 @@ def _route_tracking_error(
 
 def _write_route_debug(path: Path, waypoints: list) -> None:
     try:
+        import math
+
         with open(path, "w") as f:
-            f.write("idx,x,y,yaw_deg,is_junction,road_id,lane_id\n")
+            f.write("idx,x,y,yaw_deg,delta_yaw_deg,is_junction,road_id,lane_id\n")
+            prev_yaw = None
             for i, wp in enumerate(waypoints):
                 loc = wp.transform.location
                 rot = wp.transform.rotation
+                delta_yaw = 0.0
+                if prev_yaw is not None:
+                    delta_yaw = (rot.yaw - prev_yaw + 180.0) % 360.0 - 180.0
+                prev_yaw = rot.yaw
                 f.write(
-                    f"{i},{loc.x:.3f},{loc.y:.3f},{rot.yaw:.1f},"
+                    f"{i},{loc.x:.3f},{loc.y:.3f},{rot.yaw:.1f},{delta_yaw:.1f},"
                     f"{int(bool(wp.is_junction))},"
                     f"{getattr(wp, 'road_id', '')},{getattr(wp, 'lane_id', '')}\n"
                 )

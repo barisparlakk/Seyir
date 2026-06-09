@@ -5,6 +5,7 @@ Turkish NPC drivers, motorcyclists, and jaywalking pedestrians.
 from __future__ import annotations
 
 import logging
+import math
 import os
 import random
 from pathlib import Path
@@ -126,7 +127,7 @@ class NarrowStreetScenario:
             nxts = cursor.next(gap)
             if not nxts:
                 break
-            cursor = nxts[0]
+            cursor = _choose_route_waypoint(cursor, nxts)
             # Choose a lane: 0=current, 1=left, 2=right (cycling)
             target_wp = cursor
             mode = slot % 3
@@ -189,7 +190,7 @@ class NarrowStreetScenario:
             nxts = cursor.next(route_step_m)
             if not nxts:
                 break
-            cursor = nxts[0]
+            cursor = _choose_route_waypoint(cursor, nxts)
             route_wps.append(cursor)
         print(f"Route ready: {len(route_wps)} waypoints, target={route_wps[-1].transform.location}", flush=True)
         self._route_waypoints = route_wps
@@ -287,6 +288,27 @@ def _env_float(name: str, default: float, min_value: float | None = None) -> flo
         logger.warning("Ignoring too-small %s=%.1f; using %.1f", name, value, default)
         return default
     return value
+
+
+def _choose_route_waypoint(current: Any, candidates: list[Any]) -> Any:
+    if len(candidates) == 1:
+        return candidates[0]
+
+    current_yaw = math.radians(current.transform.rotation.yaw)
+
+    def _score(wp: Any) -> float:
+        yaw = math.radians(wp.transform.rotation.yaw)
+        yaw_delta = abs((yaw - current_yaw + math.pi) % (2 * math.pi) - math.pi)
+        score = yaw_delta
+        if getattr(wp, "lane_id", None) != getattr(current, "lane_id", None):
+            score += 1.0
+        if getattr(wp, "road_id", None) != getattr(current, "road_id", None):
+            score += 0.25
+        if getattr(wp, "lane_type", None) != getattr(current, "lane_type", None):
+            score += 2.0
+        return score
+
+    return min(candidates, key=_score)
 
 
 if __name__ == "__main__":
